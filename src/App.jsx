@@ -19,6 +19,10 @@ const BehariShipper = lazy(() => import("../behari-shipper-v2.jsx"));
 // not be the fleet owner at all (see models/fleetOwner.js's whole reason
 // for existing). One job only: start/stop location sharing for a trip.
 const BehariDriverTracker = lazy(() => import("../behari-driver-tracker.jsx"));
+// Phase 4H — the real Load/Booking/Trip marketplace, backed by backend/.
+// Standalone, same precedent as the Driver Tracker: new backend-connected
+// capability, not a rewrite of the existing escrow-simulated demo flows.
+const BehariMarketplace = lazy(() => import("../behari-marketplace.jsx"));
 
 
 function useWindowWidth() {
@@ -409,10 +413,11 @@ const PORTALS = [
   { id:"pay",     label:"M-Pesa Escrow",    sub:"Payment & escrow engine",   icon:"📱", component:BehariPay     },
   { id:"admin",   label:"Admin Dashboard",  sub:"Operations & KYC centre",   icon:"⚙", component:BehariAdmin   },
   { id:"tracker", label:"Driver Tracker",   sub:"Live location sharing",     icon:"📍", component:BehariDriverTracker },
+  { id:"marketplace", label:"Marketplace",  sub:"Real loads & bookings (backend)", icon:"🏪", component:BehariMarketplace },
 ];
 
 const NAV_LABELS = {
-  driver:"Carrier", shipper:"Shipper", pay:"M-Pesa", admin:"Admin", tracker:"Driver Tracker"
+  driver:"Carrier", shipper:"Shipper", pay:"M-Pesa", admin:"Admin", tracker:"Driver Tracker", marketplace:"Marketplace"
 };
 
 // Which portals each role can access
@@ -425,10 +430,14 @@ const ROLE_ACCESS = {
   // people (see models/fleetOwner.js), so this can't assume the person
   // holding the phone is signed in anywhere else in the app.
   tracker: ["tracker"],
+  // Phase 4H — also its own role: it authenticates against the real
+  // backend (shipper or fleet_owner), independent of the legacy
+  // localStorage role simulation the other portals still use.
+  marketplace: ["marketplace"],
 };
 
 const ROLE_NAMES = {
-  driver:"Carrier", shipper:"Shipper", admin:"Admin", tracker:"Driver"
+  driver:"Carrier", shipper:"Shipper", admin:"Admin", tracker:"Driver", marketplace:"Marketplace"
 };
 
 export default function App() {
@@ -814,6 +823,9 @@ export default function App() {
             </button>
             <button onClick={()=>signIn("tracker")} style={{ background:"transparent",color:"rgba(255,255,255,0.6)",border:"none",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font,textDecoration:"underline",textUnderlineOffset:3 }}>
               📍 I'm a driver — open Driver Tracker →
+            </button>
+            <button onClick={()=>signIn("marketplace")} style={{ background:"transparent",color:"rgba(255,255,255,0.6)",border:"none",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font,textDecoration:"underline",textUnderlineOffset:3 }}>
+              🏪 Real Marketplace (backend) →
             </button>
           </div>
         </div>

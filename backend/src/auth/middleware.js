@@ -18,7 +18,7 @@ export function requireAuth(req, res, next) {
   }
   try {
     const payload = verifyToken(token);
-    req.user = { id: payload.sub, role: payload.role, name: payload.name, driverId: payload.driverId };
+    req.user = { id: payload.sub, role: payload.role, name: payload.name, driverId: payload.driverId, fleetOwnerId: payload.fleetOwnerId };
     next();
   } catch {
     return res.status(401).json({ error: "Invalid or expired token." });

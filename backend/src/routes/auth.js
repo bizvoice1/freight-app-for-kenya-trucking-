@@ -35,7 +35,7 @@ router.post("/login", async (req, res) => {
   const token = signToken(user);
   res.json({
     token,
-    user: { id: user.id, name: user.name, role: user.role, driverId: user.driverId },
+    user: { id: user.id, name: user.name, role: user.role, driverId: user.driverId, fleetOwnerId: user.fleetOwnerId },
   });
 });
 

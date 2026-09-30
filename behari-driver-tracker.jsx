@@ -6,22 +6,20 @@ import { useState, useEffect, useCallback } from "react";
 // job only: start/stop sharing this device's location for whichever trip
 // is currently assigned to this driver.
 //
-// NOTE ON THE SEAM THIS PHASE LEAVES: trip/fleet LOOKUP below still reads
-// from the frontend's own localStorage-backed tripService/fleetService
-// (Phase 4B/4C) — there is no "list my trips" endpoint in 4F's backend, by
-// design (see backend/src/db/seed.js). Only the actual tracking — identity,
-// start/stop, and every location read/write — goes through the real
-// backend now. A trip only tracks end-to-end today if it exists in BOTH
-// stores, which is true for the seeded demo trip; migrating booking/trip
-// creation to the backend too is a later phase's job, same as this one
-// deferred escrow/M-Pesa/notifications.
+// Phase 4H: the trip list below now comes from the real backend
+// (trackingService.getMyTrips(), GET /api/trips?driverId=) instead of the
+// frontend's localStorage tripService — trips created through the real
+// Marketplace (Load -> Booking -> Trip) only ever exist on the backend, so
+// this is no longer optional. Truck plate lookup still falls back to the
+// frontend's fleetService for the Phase 4F/4G seed trip, which predates
+// backend/api/trucks — see getTruckLabel below.
 import { getTruckById } from "./src/services/fleetService.js";
-import { getTrips } from "./src/services/tripService.js";
 import { ACTIVE_TRIP_STATUSES } from "./src/models/trip.js";
 import {
   loginDriver,
   getCurrentDriverUser,
   logoutDriver,
+  getMyTrips,
   startDriverTracking,
   stopDriverTracking,
   getTrackingState,
@@ -101,8 +99,8 @@ function TripPicker({ driverId, onPick, onSwitchDriver }) {
   const [trips, setTrips] = useState(null);
 
   useEffect(() => {
-    getTrips().then(all => {
-      setTrips(all.filter(t => t.driverId === driverId && ACTIVE_TRIP_STATUSES.has(t.status)));
+    getMyTrips().then(all => {
+      setTrips(all.filter(t => ACTIVE_TRIP_STATUSES.has(t.status)));
     });
   }, [driverId]);
 
@@ -148,7 +146,7 @@ function TrackerScreen({ tripId, driverName, onSwitchTrip }) {
   const [now, setNow]     = useState(Date.now()); // ticks the "updated Ns ago" label
 
   useEffect(() => {
-    getTrips().then(all => {
+    getMyTrips().then(all => {
       const t = all.find(x => x.id === tripId) || null;
       setTrip(t);
       if (t?.truckId) getTruckById(t.truckId).then(setTruck);

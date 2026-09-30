@@ -1,26 +1,33 @@
-# Behari Freight — Tracking Backend (Phase 4F)
+# Behari Freight — Backend (Phases 4F–4H)
 
-Real backend for the Driver Tracker (Phase 4E): auth, trip lookup, and
-location ingest/read, replacing that one surface's localStorage-only
-persistence with an HTTPS API + database.
+Real backend: auth, GPS tracking (4F), shared live-tracking reads (4G), and
+now the real Load → Booking → Trip chain (4H) — a shipper posts a load, a
+transporter accepts it and assigns a truck+driver, the backend creates the
+Trip, the driver tracks from their phone, and any authenticated viewer can
+watch it move. All server-identity-checked, all in one SQLite (dev)/
+Postgres-ready database.
 
 ## Scope (deliberately)
 
-**In this phase:** authentication (phone+PIN, backend-issued JWT), trip
-read, location POST/latest/history, tracking start/stop. All served from a
-real database, all identity-checked server-side.
+**Built across 4F–4H:** phone+PIN auth (backend-issued JWT), GPS
+tracking (post/latest/history, start/stop), trip lookup (single + filtered
+list), **loads** (post, list, get), **bookings** (accept → assign
+truck+driver → create trip), truck/driver listing.
 
-**Not in this phase** (unchanged, still frontend/localStorage):
-booking/trip *creation* (`tripService.createTripFromBooking`), fleet
-assignment (`fleetService.assignDriverToTruck`), the GPS *simulator*
-(`gpsService.generateLocationUpdate` — Phase 4D), escrow, M-Pesa,
-notifications, WebSockets, production OTP, AI matching, analytics.
+**Not yet built:** escrow/payment (explicitly deferred to Phase 4K —
+`loads`/`bookings` have no financial columns at all), notifications,
+WebSockets/realtime (polling only, by design — see the frontend's
+`useLiveTrip.js`), production OTP, AI matching, analytics, cosmetic
+redesign. Fleet *assignment* (which driver currently mans which truck) also
+stays a frontend/`fleetService.js` concern — the backend only reads its own
+seeded snapshot of that when validating a booking's truck+driver pick.
 
-That means a trip only tracks end-to-end through the real backend today if
-it exists in **both** stores — true for the one seeded demo trip
-(`TRP-1000`, James / `KDJ 441Z` / `KE-2039`). Migrating booking/trip
-creation to the backend too is a later phase, same as this one deferred
-escrow.
+The frontend's existing demo (`SEED_LOADS`, the escrow-simulated Post
+Cargo/Find Loads flows in the Carrier/Shipper/Admin portals) is a
+completely separate, untouched dataset — Phase 4H's `loads`/`bookings`
+are new entities for the new `behari-marketplace.jsx` surface, not a
+backend mirror of the existing demo data. See `src/domain/load.js`'s
+header for why.
 
 ## Run it
 
@@ -79,12 +86,53 @@ authenticated caller's real identity.
 ## Endpoints
 
 ```
-POST /api/auth/login                        { phone, pin, role } -> { token, user }
+POST /api/auth/login                          { phone, pin, role } -> { token, user }
 
+GET  /api/trips?loadId=&truckId=&driverId=&status=
 GET  /api/trips/:tripId
-POST /api/trips/:tripId/tracking/start      (driver, must own the trip)
-POST /api/trips/:tripId/tracking/stop       (driver, must own the trip)
-POST /api/trips/:tripId/location            (driver, must own the trip)
+POST /api/trips/:tripId/tracking/start        (driver, must own the trip)
+POST /api/trips/:tripId/tracking/stop         (driver, must own the trip)
+POST /api/trips/:tripId/location              (driver, must own the trip)
 GET  /api/trips/:tripId/location/latest
 GET  /api/trips/:tripId/location/history
+
+GET  /api/trucks?ownerId=
+GET  /api/drivers
+
+POST /api/loads                               (shipper)  { cargo, origin, destination, weight?, truckType?, price?, pickupDate? }
+GET  /api/loads?status=&shipperId=
+GET  /api/loads/:loadId
+POST /api/loads/:loadId/accept                (fleet_owner) -> creates a Booking, load status -> Booked
+
+GET  /api/bookings?transporterId=&loadId=&status=
+GET  /api/bookings/:bookingId
+POST /api/bookings/:bookingId/assign          (fleet_owner, must own the booking) { truckId, driverId }
+POST /api/bookings/:bookingId/create-trip     (fleet_owner, must own the booking) -> creates the Trip
 ```
+
+## Load → Booking → Trip: the defining test
+
+```
+Shipper logs in -> POST /api/loads -> load appears in GET /api/loads
+Transporter logs in -> sees the same load -> POST /api/loads/:id/accept
+  -> Booking created (status Accepted), load flips to Booked
+Transporter -> POST /api/bookings/:id/assign {truckId, driverId}
+  -> only succeeds if that truck's currentDriverId already IS that driver
+  -> Booking status -> Assigned
+Transporter -> POST /api/bookings/:id/create-trip
+  -> same invariants as tripService.createTripFromBooking on the frontend
+     (truck/driver still paired; truck/driver/load have no other active trip)
+  -> Trip created, Booking status -> Trip Created
+Driver logs in -> GET /api/trips?driverId=<self> -> sees the new trip
+Driver starts GPS (Driver Tracker) -> POST /api/trips/:id/location
+Shipper/Admin/Transporter -> GET /api/trips/:id/location/latest -> sees it move
+```
+
+Verified live, twice — once via curl end-to-end, once through the actual
+UIs (`behari-marketplace.jsx` for post/accept/assign/create-trip,
+`behari-driver-tracker.jsx` for the driver seeing and tracking the new
+trip, the Shipper's Marketplace view and Admin's Network tab for watching
+it). Booking != Trip is enforced structurally: `/assign` will happily pair
+an already-busy truck+driver (e.g. the Phase 4F/4G demo pairing), but
+`/create-trip` then correctly rejects with "truck already has an active
+trip" — assignment and execution are genuinely separate steps.

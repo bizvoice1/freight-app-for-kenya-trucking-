@@ -15,16 +15,16 @@ import jwt from "jsonwebtoken";
 const JWT_SECRET  = process.env.JWT_SECRET || "behari-dev-only-secret-do-not-use-in-production";
 const TOKEN_TTL   = "12h";
 
-/** @param {{id:string, role:string, name:string, driverId:string|null}} user */
+/** @param {{id:string, role:string, name:string, driverId:string|null, fleetOwnerId?:string|null}} user */
 export function signToken(user) {
   return jwt.sign(
-    { sub: user.id, role: user.role, name: user.name, driverId: user.driverId ?? null },
+    { sub: user.id, role: user.role, name: user.name, driverId: user.driverId ?? null, fleetOwnerId: user.fleetOwnerId ?? null },
     JWT_SECRET,
     { expiresIn: TOKEN_TTL }
   );
 }
 
-/** @returns {{sub:string, role:string, name:string, driverId:string|null}} */
+/** @returns {{sub:string, role:string, name:string, driverId:string|null, fleetOwnerId:string|null}} */
 export function verifyToken(token) {
   return jwt.verify(token, JWT_SECRET);
 }

@@ -170,3 +170,22 @@ export function stopDriverTracking(tripId) {
     fetch(`${API_BASE}/api/trips/${tripId}/tracking/stop`, { method: "POST", headers: _authHeaders() }).catch(() => { /* best-effort */ });
   }
 }
+
+/**
+ * Phase 4H — the trips a logged-in driver is actually assigned to, per the
+ * real backend (now the authoritative source once a trip comes from the
+ * Marketplace's Booking -> Trip flow, not just the Phase 4F/4G seed trip).
+ * Uses this file's own already-authenticated token — not trackingApi.js's
+ * separate demo-auth cache, since this driver already has a real one.
+ */
+export async function getMyTrips() {
+  const user = getCurrentDriverUser();
+  if (!user) return [];
+  try {
+    const res = await fetch(`${API_BASE}/api/trips?driverId=${encodeURIComponent(user.driverId)}`, { headers: _authHeaders() });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
+}

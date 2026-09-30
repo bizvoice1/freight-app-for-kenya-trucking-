@@ -34,19 +34,24 @@ async function seed() {
   const peter = driverByName("Peter Otieno");
   const kdj   = FLEET_SEED_TRUCKS.find(t => t.plate === "KDJ 441Z");
 
+  const kbd = FLEET_SEED_TRUCKS.find(t => t.plate === "KBD 092K");
+
   for (const t of FLEET_SEED_TRUCKS) {
-    // Seed one live assignment (James -> KDJ 441Z) so the location/tracking
-    // endpoints have a real, already-active trip to exercise end-to-end,
-    // matching the exact scenario already demonstrated on the frontend.
+    // Two live pairings seeded: James/KDJ 441Z already has the Phase 4F/4G
+    // demo trip (proves the "truck already has an active trip" invariant
+    // still holds for a brand-new 4H booking); Peter/KBD 092K is paired but
+    // free, so Phase 4H's own acceptance test has a truck+driver combo it
+    // can actually carry all the way to a new Trip.
     const isKdj = t.id === kdj.id;
+    const isKbd = t.id === kbd.id;
     db.insert(trucks).values({
       id: t.id,
       plate: t.plate,
       truckType: t.truckType,
       capacity: t.capacity || null,
       ownerId: t.ownerId,
-      currentDriverId: isKdj ? james.id : t.currentDriverId,
-      status: isKdj ? "Assigned" : t.status,
+      currentDriverId: isKdj ? james.id : isKbd ? peter.id : t.currentDriverId,
+      status: (isKdj || isKbd) ? "Assigned" : t.status,
       currentLat: t.currentLocation?.lat ?? null,
       currentLng: t.currentLocation?.lng ?? null,
     }).onConflictDoNothing().run();
@@ -54,13 +59,14 @@ async function seed() {
 
   for (const d of FLEET_SEED_DRIVERS) {
     const isJames = d.id === james.id;
+    const isPeter = d.id === peter.id;
     db.insert(drivers).values({
       id: d.id,
       name: d.name,
       phone: d.phone || null,
       licenseNumber: d.licenseNumber || null,
-      assignedTruckId: isJames ? kdj.id : d.assignedTruckId,
-      status: isJames ? "Assigned" : d.status,
+      assignedTruckId: isJames ? kdj.id : isPeter ? kbd.id : d.assignedTruckId,
+      status: (isJames || isPeter) ? "Assigned" : d.status,
     }).onConflictDoNothing().run();
   }
 
@@ -104,7 +110,7 @@ async function seed() {
     { id: "USR-1001", phone: peter.phone, role: "driver",      name: peter.name,     driverId: peter.id },
     { id: "USR-1002", phone: "0700000001", role: "shipper",    name: "Demo Shipper", driverId: null },
     { id: "USR-1003", phone: "0700000002", role: "admin",      name: "Demo Admin",   driverId: null },
-    { id: "USR-1004", phone: DEMO_FLEET_OWNER.phone, role: "fleet_owner", name: DEMO_FLEET_OWNER.name, driverId: null },
+    { id: "USR-1004", phone: DEMO_FLEET_OWNER.phone, role: "fleet_owner", name: DEMO_FLEET_OWNER.name, driverId: null, fleetOwnerId: DEMO_FLEET_OWNER.id },
   ];
 
   for (const u of seedUsers) {

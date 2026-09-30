@@ -1,3 +1,15 @@
+CREATE TABLE `bookings` (
+	`id` text PRIMARY KEY NOT NULL,
+	`load_id` text NOT NULL,
+	`transporter_id` text NOT NULL,
+	`truck_id` text,
+	`driver_id` text,
+	`trip_id` text,
+	`status` text NOT NULL,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE `drivers` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
@@ -12,6 +24,21 @@ CREATE TABLE `fleet_owners` (
 	`name` text NOT NULL,
 	`phone` text,
 	`company` text
+);
+--> statement-breakpoint
+CREATE TABLE `loads` (
+	`id` text PRIMARY KEY NOT NULL,
+	`shipper_id` text NOT NULL,
+	`cargo` text NOT NULL,
+	`origin` text NOT NULL,
+	`destination` text NOT NULL,
+	`weight` text,
+	`truck_type` text,
+	`price` real,
+	`pickup_date` text,
+	`status` text NOT NULL,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE `location_updates` (
@@ -63,7 +90,8 @@ CREATE TABLE `users` (
 	`pin_hash` text NOT NULL,
 	`role` text NOT NULL,
 	`name` text NOT NULL,
-	`driver_id` text
+	`driver_id` text,
+	`fleet_owner_id` text
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `users_phone_role_unique` ON `users` (`phone`,`role`);
