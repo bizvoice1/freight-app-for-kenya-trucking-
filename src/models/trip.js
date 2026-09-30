@@ -22,8 +22,15 @@
  *   different lifecycles, the same reasoning models/load.js used to keep
  *   ESCROW_STATUS separate from LOAD_STATUS.
  *
- *   Zero React imports — plain JS, same rule as models/load.js.
+ *   Zero React imports — plain JS, same rule as models/load.js. This also
+ *   makes it importable directly from Phase 4F's backend (Node), which is
+ *   why validateLocationReading() below lives here rather than in a
+ *   frontend-only service — the same rule must run on both sides of the
+ *   trust boundary, and a shared pure function is how that stays one rule
+ *   instead of two copies that can drift.
  */
+
+import { distanceKm } from "./match.js";
 
 /* ── Trip status values ─────────────────────────────────────────────────── */
 
@@ -215,4 +222,51 @@ export function createLocationUpdate(
     source,
     timestamp: new Date().toISOString(),
   };
+}
+
+/* ── Device-reading quality guards (Phase 4E/4F) ──────────────────────────── */
+
+const MAX_ACCURACY_M    = 500;   // reject readings this imprecise or worse
+const MAX_STALENESS_MS  = 60000; // reject a device timestamp older than this
+const MAX_PLAUSIBLE_KMH = 180;   // reject an implied speed above this between consecutive points
+
+/**
+ * Basic GPS-quality guards for a device-reported reading — deliberately
+ * simple checks, not fraud detection, per the 4E/4F scope. Pure: takes the
+ * previous LocationUpdate (if any) as a parameter rather than fetching it
+ * itself, so it works identically whether the caller is the frontend's
+ * gpsService.js (reading its in-memory store) or Phase 4F's backend
+ * (reading Postgres/SQLite) — one rule, not two copies that can drift.
+ *
+ * @param {Object} candidate
+ * @param {number} candidate.lat
+ * @param {number} candidate.lng
+ * @param {number} [candidate.accuracy]
+ * @param {number} [candidate.deviceTimestamp] - ms epoch, from the GPS reading itself
+ * @param {Object|null} previous - the trip's last accepted LocationUpdate, or null
+ * @returns {string|null} a rejection reason, or null if the reading is acceptable
+ */
+export function validateLocationReading({ lat, lng, accuracy, deviceTimestamp }, previous) {
+  if (typeof lat !== "number" || typeof lng !== "number" || Number.isNaN(lat) || Number.isNaN(lng)) {
+    return "Missing or invalid coordinates.";
+  }
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return "Coordinate values out of range.";
+  }
+  if (typeof accuracy === "number" && accuracy > MAX_ACCURACY_M) {
+    return `GPS accuracy too poor (${Math.round(accuracy)}m).`;
+  }
+  if (typeof deviceTimestamp === "number" && (Date.now() - deviceTimestamp) > MAX_STALENESS_MS) {
+    return "GPS reading is stale.";
+  }
+
+  if (previous) {
+    const km         = distanceKm({ lat: previous.lat, lng: previous.lng }, { lat, lng }) ?? 0;
+    const elapsedHrs = Math.max((Date.now() - new Date(previous.timestamp).getTime()) / 3_600_000, 1 / 3600);
+    const impliedKmh = km / elapsedHrs;
+    if (impliedKmh > MAX_PLAUSIBLE_KMH) {
+      return `Implausible jump for a truck (${Math.round(impliedKmh)} km/h implied).`;
+    }
+  }
+  return null;
 }

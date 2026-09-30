@@ -30,8 +30,7 @@
  *   progress" layer changes, from Load.status to Trip.status.
  */
 
-import { createLocationUpdate, TRIP_STATUS, TERMINAL_TRIP_STATUSES } from "../models/trip.js";
-import { distanceKm } from "../models/match.js";
+import { createLocationUpdate, TRIP_STATUS, TERMINAL_TRIP_STATUSES, validateLocationReading } from "../models/trip.js";
 
 /* ── Route definitions ──────────────────────────────────────────────────── */
 
@@ -461,45 +460,12 @@ export function stopSimulation(tripId) {
  * position for a trip — it trusts truckId/driverId exactly as given. That
  * check belongs one layer up, in services/trackingService.js, which derives
  * them from the Trip record itself (never from client input) before ever
- * calling this. What this function DOES own is GPS *quality*: a reading can
- * come from the right person and still be garbage (stale, wildly
- * inaccurate, a physically impossible jump) — see _validateDeviceReading.
+ * calling this. What this function DOES own is running the shared GPS-
+ * quality guard (models/trip.js's validateLocationReading — the same
+ * function Phase 4F's backend calls, so the rule can't drift between the
+ * two): a reading can come from the right person and still be garbage
+ * (stale, wildly inaccurate, a physically impossible jump).
  */
-
-const MAX_ACCURACY_M    = 500;  // reject readings this imprecise or worse
-const MAX_STALENESS_MS  = 60000; // reject a device timestamp older than this
-const MAX_PLAUSIBLE_KMH = 180;   // reject an implied speed above this between consecutive points
-
-/**
- * Basic GPS-quality guards — deliberately simple checks, not fraud
- * detection, per the phase scope. Returns a rejection reason string, or
- * null if the reading is acceptable.
- */
-function _validateDeviceReading(tripId, { lat, lng, accuracy, deviceTimestamp }) {
-  if (typeof lat !== "number" || typeof lng !== "number" || Number.isNaN(lat) || Number.isNaN(lng)) {
-    return "Missing or invalid coordinates.";
-  }
-  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-    return "Coordinate values out of range.";
-  }
-  if (typeof accuracy === "number" && accuracy > MAX_ACCURACY_M) {
-    return `GPS accuracy too poor (${Math.round(accuracy)}m).`;
-  }
-  if (typeof deviceTimestamp === "number" && (Date.now() - deviceTimestamp) > MAX_STALENESS_MS) {
-    return "GPS reading is stale.";
-  }
-
-  const prev = getCurrentLocation(tripId);
-  if (prev) {
-    const km          = distanceKm({ lat: prev.lat, lng: prev.lng }, { lat, lng }) ?? 0;
-    const elapsedHrs  = Math.max((Date.now() - new Date(prev.timestamp).getTime()) / 3_600_000, 1 / 3600);
-    const impliedKmh  = km / elapsedHrs;
-    if (impliedKmh > MAX_PLAUSIBLE_KMH) {
-      return `Implausible jump for a truck (${Math.round(impliedKmh)} km/h implied).`;
-    }
-  }
-  return null;
-}
 
 /**
  * Records a real device-reported position for a trip. Unlike
@@ -520,7 +486,7 @@ function _validateDeviceReading(tripId, { lat, lng, accuracy, deviceTimestamp })
  * @returns {{accepted:boolean, update:Object|null, reason:string|null}}
  */
 export function recordDeviceLocation({ tripId, truckId, driverId, lat, lng, accuracy, speed = 0, heading = 0, deviceTimestamp }) {
-  const rejection = _validateDeviceReading(tripId, { lat, lng, accuracy, deviceTimestamp });
+  const rejection = validateLocationReading({ lat, lng, accuracy, deviceTimestamp }, getCurrentLocation(tripId));
   if (rejection) return { accepted: false, update: null, reason: rejection };
 
   const update = createLocationUpdate(
