@@ -31,6 +31,32 @@ findings materially change the plan from a "just call the API" assumption:
 
 ---
 
+## 0.5. Daraja is an external rail, not the source of truth
+
+```
+Daraja (external, outside our control)
+   │
+   ▼
+Payment events (payment_events — our own append-only record of what Daraja told us, and when)
+   │
+   ▼
+Behari's own ledger (payments / escrows / payouts — derived FROM events, never live-queried FROM Daraja at decision time)
+   │
+   ▼
+Escrow state (what every portal reads)
+```
+
+Concretely: **no code path ever asks "is this paid?" by calling Daraja and trusting the live
+answer.** `escrow.status` is always read from our own database, which is always updated by
+processing a *recorded* event (a callback we received and logged), never by a synchronous
+in-request call to Daraja's own transaction-status API. If we ever add a reconciliation job that
+polls Daraja to catch a callback we might have missed (a legitimate future need — see Section 2's
+`reconciliation_flags`), that job still only ever *writes a new event*, which then goes through the
+exact same processing path as a real callback — it doesn't get a shortcut that mutates `escrows`
+directly. One write path, always, regardless of what triggered it.
+
+---
+
 ## 1. Core architecture (as given, annotated with where each piece lives)
 
 ```
@@ -91,7 +117,7 @@ fails and the shipper retries).
 | status | text | `Pending → StkSent → Paid \| Failed \| Cancelled \| Timeout` |
 | merchantRequestId | text | Daraja's `MerchantRequestID` from the sync response |
 | checkoutRequestId | text UNIQUE | Daraja's `CheckoutRequestID` — **the idempotency key** for the STK callback |
-| mpesaReceiptNumber | text | set exactly once, on the first successful callback; never overwritten |
+| mpesaReceiptNumber | text UNIQUE (nullable) | set exactly once, on the first successful callback; never overwritten. UNIQUE **across all payments, not just this one** — see invariant "one M-Pesa transaction ID → max one accepted payment event" in Section 2.5 |
 | resultCode, resultDesc | integer, text | raw Daraja result, for audit/debugging |
 | createdAt, updatedAt | text | ISO-8601, same convention as every other table |
 
@@ -110,21 +136,38 @@ its funding payment had to be retried).
 | createdAt, updatedAt | text | |
 
 ### `payouts`
-One row per B2C payout **attempt**. `escrowId` is `UNIQUE` — this is where "no double payout" is
-enforced at the schema level, not just in application logic: the database physically cannot hold
-two payout rows for the same escrow.
+One row per B2C payout **attempt** — a single escrow can have *multiple* payout rows over time if
+earlier attempts fail (Section 6's retry path requires this), but at most one of them may ever
+reach `Confirmed`.
+
+**Correction made while writing this revision:** the first draft of this spec put a plain `UNIQUE`
+constraint on `escrowId`, reasoning "that's how we stop double payout." That's wrong, and the
+invariant framing below is what caught it — a plain unique constraint would make a *failed*
+payout attempt permanently block any retry, which directly contradicts Section 6's own text ("a
+failed payout must be retryable"). The correct constraint is a **partial unique index**, enforced
+only among `Confirmed` rows:
+
+```sql
+CREATE UNIQUE INDEX payouts_one_confirmed_per_escrow
+  ON payouts (escrow_id) WHERE status = 'Confirmed';
+```
+
+(SQLite and Postgres both support partial/filtered unique indexes with identical syntax — no
+migration-path cost from the dev→production swap this project already commits to.) This is the
+schema-level backstop for "one escrow → max one *successful* payout"; retries are unlimited until
+one succeeds, at which point the index makes a second `Confirmed` row physically impossible.
 
 | column | type | notes |
 |---|---|---|
 | id | text PK | `PO-1000` |
-| escrowId | text UNIQUE | FK → escrows.id |
+| escrowId | text | FK → escrows.id — **not** plain-unique; see partial index above |
 | transporterId | text | FK → users.id (role `fleet_owner`) |
 | amount | real | copied from the escrow, not re-entered |
 | phoneNumber | text | transporter's payout MSISDN |
 | status | text | `Pending → Requested → Confirmed \| Failed` |
 | conversationId | text UNIQUE | Daraja's `ConversationID` — **the idempotency key** for the B2C callback |
 | originatorConversationId | text | Daraja's `OriginatorConversationID` |
-| transactionId | text | Daraja's M-Pesa transaction id for the payout leg; immutable once set |
+| transactionId | text UNIQUE (nullable) | Daraja's M-Pesa transaction id for the payout leg; immutable once set, unique across all payouts |
 | resultCode, resultDesc | integer, text | |
 | createdAt, updatedAt | text | |
 
@@ -154,6 +197,50 @@ silently being dropped.
 | rawPayload | text (JSON) | |
 | status | text | `open` \| `resolved` |
 | createdAt, resolvedAt | text | |
+
+---
+
+## 2.5. Financial invariants — the actual contract
+
+These matter more than any endpoint listed in this document. Every invariant below states **what
+must always be true** and **exactly where that's enforced** — a schema constraint, a code check, or
+the shape of the state machine itself. Implementation is not "done" if it passes the acceptance
+tests in Section 9 but violates one of these; the tests exist to exercise these, not the other way
+around.
+
+| Invariant | Enforced by |
+|---|---|
+| **One booking → one escrow** | `escrows.bookingId UNIQUE` |
+| **One escrow → unlimited payout attempts, max one successful** | `payouts.escrowId` is *not* unique (retries allowed); the partial index `payouts_one_confirmed_per_escrow` makes a second `Confirmed` row impossible |
+| **One M-Pesa transaction ID → max one accepted payment/payout event** | `payments.mpesaReceiptNumber UNIQUE`, `payouts.transactionId UNIQUE` — both nullable so non-terminal rows don't collide, both checked against *every* row (not just the one being processed) before a callback is accepted as new money movement |
+| **`HELD` cannot become `SETTLED` without a successful payout** | `canTransitionEscrow()`'s transition table has no edge from `HELD` (or `RELEASE_PENDING`) directly to `SETTLED` — the only path is `RELEASE_PENDING → RELEASED → SETTLED`, and the code only ever writes `RELEASED` inside the B2C callback handler's `ResultCode === 0` branch |
+| **`PAYOUT_CONFIRMED` cannot be paid again** | Same partial index, plus: `/escrows/:id/release` requires `escrow.status === RELEASE_PENDING`, and an escrow that reached `RELEASED`/`SETTLED` can never return to `RELEASE_PENDING` (no such edge exists in the transition table) |
+| **`FAILED` / `REVERSED` never silently become successful** | These are attempt-scoped, not entity-scoped: a `Failed` payment or payout row is never mutated into `Paid`/`Confirmed` after the fact — recovery always means a **new** payment or payout row (a fresh `checkoutRequestId`/`conversationId`), and the old failed row stays failed forever as an honest record of what happened |
+| **`RELEASE_PENDING` does not mean money has moved** | Structural: the only thing that sets `RELEASE_PENDING` is `evaluateReleaseEligibility()` succeeding (Section 5) — that function never calls Daraja. Only `POST /escrows/:id/release` calls Daraja, and only its callback can move the status past `RELEASE_PENDING` |
+| **A callback can never cause a state change twice** | `checkoutRequestId`/`conversationId` lookup at the top of every callback handler; a match already in a terminal-for-that-attempt status is logged as `duplicate_callback_ignored` and returns 200 with zero writes to `payments`/`escrows`/`payouts` |
+| **The client never determines the amount** | `payments.amount` is set once, server-side, from `loads.price` at payment-creation time; every later step (STK callback verification, escrow, payout) compares against *that stored value*, never against anything supplied in a request body or a callback in isolation |
+
+### Multi-level idempotency (not just "the Daraja request is idempotent")
+
+The user-approved guardrail is that duplication must be caught at *every* layer it can occur, not
+just the outermost one:
+
+```
+STK request duplicated      → a booking with a non-terminal payments row rejects a second POST /payment
+callback duplicated         → checkoutRequestId/conversationId lookup, terminal status = ignored
+payment event duplicated    → payment_events rows are written inside the same transaction as the
+                               status change they describe, so a retried callback that re-enters
+                               step 4 of Section 3 never gets past the "already terminal" check to
+                               log a second event either
+release request duplicated  → escrow.status !== RELEASE_PENDING → 409, before any Daraja call is made
+B2C request duplicated      → same non-terminal-row check as the STK case, scoped to the escrow
+                               instead of the booking
+```
+
+Each layer is a separate check in a separate place — there is no single "idempotency middleware"
+that's assumed to catch everything, because the five things above happen at genuinely different
+times and can fail independently (a network retry duplicates the request; Safaricom's own retry
+policy duplicates the callback; a slow client double-clicks "release").
 
 ---
 
@@ -190,9 +277,15 @@ POST /api/payments/callback/stk           (Safaricom → us; NOT behind requireA
 4. Found, still `StkSent` → check `ResultCode`:
    - `0` (success): extract `CallbackMetadata.Item` (`Amount`, `MpesaReceiptNumber`,
      `TransactionDate`, `PhoneNumber`). **Compare `Amount` to `payments.amount`** — mismatch →
-     `reconciliation_flags` (`amount_mismatch`), do **not** mark paid. Match → set
-     `payments.status = Paid`, `mpesaReceiptNumber` (write-once), then create the `escrows` row
-     (`status = Held`, `heldAt = now`) in the same transaction. Log `payment_events`.
+     `reconciliation_flags` (`amount_mismatch`), do **not** mark paid. **Check whether
+     `MpesaReceiptNumber` already exists on any other payment row** (the cross-payment duplicate
+     case — distinct from step 3's same-payment retry case: this is the same underlying M-Pesa
+     transaction somehow being reported against two different `payments` rows) — if so,
+     `reconciliation_flags` (`duplicate_receipt_number`), do **not** mark paid; this is exactly what
+     the `mpesaReceiptNumber UNIQUE` constraint would reject at the database level as a last resort
+     even if the application check were somehow skipped. Otherwise: set `payments.status = Paid`,
+     `mpesaReceiptNumber` (write-once), then create the `escrows` row (`status = Held`,
+     `heldAt = now`) in the same transaction. Log `payment_events`.
    - non-zero: `payments.status = Failed` (or `Cancelled` for the specific "request cancelled by
      user" result code). No escrow is created. Log `payment_events`.
 5. Always respond `200 {"ResultCode": 0, "ResultDesc": "Accepted"}` to Safaricom once the callback
@@ -275,9 +368,14 @@ established — flagged here rather than assumed.
 POST /api/escrows/:escrowId/release       (admin)
 ```
 
-1. Re-check `escrow.status === RELEASE_PENDING` (409 otherwise — also closes a race: two rapid
-   release calls can't both proceed, and the `payouts.escrowId UNIQUE` constraint is the
-   belt-and-braces backstop even if the status check somehow raced).
+1. Re-check `escrow.status === RELEASE_PENDING` (409 otherwise). **This check alone is not
+   sufficient to close the race** — the status stays `RELEASE_PENDING` both before the first
+   attempt *and* after a failed one (retries are allowed, Section 2's correction), so two rapid
+   release calls could otherwise both pass it. The actual guard: also check for an existing
+   `payouts` row on this `escrowId` with a **non-terminal** status (`Pending`/`Requested`) — if one
+   exists, 409 ("a payout is already in flight for this escrow"). Creating the new `Pending`
+   `payouts` row happens in the same transaction as this check, so the second concurrent caller's
+   check sees the first one's row and loses the race deterministically.
 2. Look up the trip's driver → **the transporter who owns that truck** is the payout recipient
    (reuses the exact ownership chain 4I already established: truck → `ownerId` → `fleet_owners`).
 3. Create `payouts` row, status `Pending`. Amount copied from the escrow — never re-entered.
@@ -299,10 +397,13 @@ unknown → reconciliation flag; already-terminal → duplicate, ignored; otherw
 - `0`: extract `Result.ResultParameters.ResultParameter[]` (`TransactionAmount`,
   `TransactionReceipt`, `ReceiverPartyPublicName`) — **note this is a different shape from STK's
   `CallbackMetadata.Item[]`** (`ResultParameter` with `Key`/`Value` vs. `Item` with `Name`/`Value` —
-  an easy field-name mixup to guard against in code review). Verify amount matches. Set
-  `payouts.status = Confirmed`, `transactionId` (write-once), `escrows.status = Released` →
-  immediately `Settled` (no further step needed once the payout is confirmed), `payment_events`
-  logged at each.
+  an easy field-name mixup to guard against in code review). Verify amount matches — mismatch →
+  `reconciliation_flags` (`amount_mismatch`), do not confirm. Check `TransactionReceipt` doesn't
+  already exist on any other payout row (same cross-attempt duplicate-transaction check as the STK
+  side) — collision → `reconciliation_flags` (`duplicate_receipt_number`), do not confirm.
+  Otherwise: set `payouts.status = Confirmed`, `transactionId` (write-once), `escrows.status =
+  Released` → immediately `Settled` (no further step needed once the payout is confirmed),
+  `payment_events` logged at each.
 - non-zero: `payouts.status = Failed`. **`escrows.status` stays `RELEASE_PENDING`** — a failed
   payout must be retryable (a new `/release` call after fixing whatever caused the failure), not a
   dead end and not a silent success.
@@ -337,10 +438,23 @@ surfaces, used for different things:
 **`backend/src/services/darajaSimulator.js` (new)** — a local, fully in-process fake of the two
 Daraja calls we make (STK push initiate, B2C initiate). Selected via `DARAJA_ENV=simulate`
 (alongside `sandbox`/`production`). Returns a realistic synchronous response immediately, then
-schedules a call to our *own* callback endpoint after a short delay — exactly the real shape,
-just sourced locally instead of over the internet. Takes a configurable outcome per call
-(`success`, `insufficient_funds`, `cancelled_by_user`, `timeout` — never calls back at all,
-`duplicate` — calls back twice, `wrong_amount` — deliberately mismatches the expected amount).
+schedules a call to our *own* callback endpoint after a configurable delay — exactly the real
+shape, just sourced locally instead of over the internet. Ten configurable outcomes per call,
+covering every failure class named as a requirement:
+
+| Outcome | What it does |
+|---|---|
+| `success` | Normal callback, `ResultCode: 0`, correct amount, fresh receipt/transaction id |
+| `cancelled_by_user` | STK-only: `ResultCode: 1032` ("request cancelled by user") |
+| `timeout` | Never calls back at all — exercises whatever timeout/expiry handling exists for a `payments`/`payouts` row stuck in `StkSent`/`Requested` |
+| `duplicate_callback` | Calls back twice with identical body — same `checkoutRequestId`/`conversationId`, same receipt |
+| `wrong_amount` | Callback amount differs from what was requested |
+| `duplicate_transaction` | Callback reports a `MpesaReceiptNumber`/`TransactionReceipt` that the simulator has already issued on a *different* attempt — the cross-payment case, distinct from `duplicate_callback` |
+| `delayed_callback` | Calls back successfully, but after a long configurable delay — proves a legitimately slow (not lost) callback is still processed correctly and nothing elsewhere assumed a fixed timeout window |
+| `failed_payout` | B2C-only: non-zero `ResultCode` — insufficient organization balance, invalid recipient, etc. |
+| `repeated_b2c_callback` | B2C-only variant of `duplicate_callback`, named separately because the B2C path's duplicate check is a distinct code path from the STK side, not shared logic |
+| `payout_reversal` | Calls back `Confirmed` normally, then — after a further delay — delivers a second event modelling a reversal. **Flagged as unverified:** unlike the original result callback, I have not confirmed Safaricom pushes a dedicated reversal webhook to `ResultURL` for B2C the same way it delivers the initial result — reversals may only surface through reconciliation (a statement/report) or a support process. The simulator models the optimistic case (a clean second callback) so the `RELEASED → REVERSED` state-machine edge and the "never silently re-succeed" invariant are exercisable now; **before implementation, confirm against the actual Daraja B2C documentation whether a reversal notification exists, and if not, `REVERSED` becomes an admin-triggered manual transition (same pattern as `/release`) rather than a callback-driven one** |
+
 This is what makes every failure branch in Section 9 actually exercisable on demand, the same
 reasoning that justified Phase 4D's GPS simulator existing alongside real device GPS.
 
@@ -385,11 +499,28 @@ integration's request/response shapes are correct; not relied on for failure-pat
 - Admin releases an escrow that is not ReleasePending (e.g. already Released)
      -> 409                                                                    [no double payout, pt.1]
 - Two near-simultaneous release calls for the same escrow
-     -> second is 409; payouts.escrowId UNIQUE is the schema-level backstop    [no double payout, pt.2]
+     -> second is 409 (non-terminal payout row already exists for this        [no double payout, pt.2]
+        escrow); the escrow-status check alone would NOT have caught this
 - B2C callback ResultCode != 0
      -> Payout -> Failed, Escrow stays ReleasePending (retryable, not stuck)   [no silent success]
+- Retry after a failed payout succeeds
+     -> new Payout row (new ConversationID), Confirmed, Escrow -> Settled;     [retries allowed,
+        the failed row is untouched and still reads Failed                     only-one-success]
+- A second payout somehow reaches Confirmed for the same escrow (forced test
+  of the partial index directly, bypassing the application-level guard)
+     -> database rejects the insert                                            [schema-level backstop]
 - Duplicate B2C callback for an already-Confirmed ConversationID
      -> logged as duplicate, zero re-payout                                    [idempotency]
+- STK callback reports a MpesaReceiptNumber already recorded on a different
+  payment (duplicate_transaction)
+     -> reconciliation_flags row, Payment NOT marked Paid                      [reconciliation, pt.2]
+- STK callback arrives successfully after a long delay (delayed_callback)
+     -> processed exactly as a normal success — no assumption anywhere that   [no premature timeout]
+        a slow callback is a lost one
+- B2C payout Confirmed, then a reversal event arrives
+     -> Escrow -> Reversed; no code path lets it silently read as Settled     [FAILED/REVERSED
+        again; this remains true even though the underlying M-Pesa money       never silently
+        actually moved once before being reversed                             succeed again]
 ```
 
 ---
@@ -415,6 +546,28 @@ calls `POST /api/bookings/:id/payment` and polls `GET /api/payments/:id` — it 
 credential, host, or shape at all. This is the same boundary the whole backend has maintained since
 Phase 4F (JWT secret, DB path — all server-only); 4K adds more secrets to the same boundary, not a
 new one.
+
+---
+
+## Approval checklist
+
+Per the explicit hold on implementation: this document is not "approved" as a whole so much as
+three specific pieces of it are, and those three become the contract implementation is checked
+against afterward.
+
+- [ ] **The escrow state machine** (Section 4) — every state, every edge, and specifically the
+      *absence* of a direct `HELD`/`RELEASE_PENDING → SETTLED` edge
+- [ ] **The financial invariants** (Section 2.5) — including the schema correction (partial unique
+      index on `payouts`, not a plain one) that this revision made
+- [ ] **The acceptance test sequence** (Section 9) — the happy path plus all sixteen deliberate
+      failure cases
+
+One open item this revision could not close: whether Daraja actually delivers a reversal
+notification for B2C payouts (flagged in Section 8's `payout_reversal` row) — worth a direct check
+against the current Daraja documentation/support channel before the `REVERSED` transition's
+trigger mechanism (callback-driven vs. admin-triggered) is finalized, since that's a real fork in
+how much of Section 6 needs to exist versus how much of it is "an admin marks this reversed
+manually, the same way `/release` already is."
 
 ---
 
