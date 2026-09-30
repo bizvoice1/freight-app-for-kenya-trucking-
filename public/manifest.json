@@ -1,0 +1,37 @@
+{
+  "name": "Behari Freight · Kenya",
+  "short_name": "Behari",
+  "description": "Kenya's smart freight marketplace — M-Pesa escrow protects every load",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#06C167",
+  "orientation": "portrait-primary",
+  "lang": "en-KE",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='80' fill='%23000'/><rect x='52' y='180' width='26' height='152' rx='8' fill='%2306C167'/><rect x='110' y='220' width='260' height='72' rx='12' fill='%23fff'/><rect x='370' y='220' width='90' height='72' rx='12' fill='%23fff'/><circle cx='160' cy='360' r='36' fill='%23333'/><circle cx='380' cy='360' r='36' fill='%23333'/></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["logistics", "business", "finance"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Find Loads",
+      "short_name": "Loads",
+      "description": "Browse available freight loads",
+      "url": "/?tab=loads",
+      "icons": [{ "src": "/manifest.json", "sizes": "96x96" }]
+    },
+    {
+      "name": "My Shipments",
+      "short_name": "Shipments",
+      "description": "Track your active shipments",
+      "url": "/?tab=shipments",
+      "icons": [{ "src": "/manifest.json", "sizes": "96x96" }]
+    }
+  ]
+}

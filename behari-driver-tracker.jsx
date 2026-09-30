@@ -1,0 +1,276 @@
+import { useState, useEffect, useCallback } from "react";
+// Phase 4E — the Driver Tracking surface. Deliberately its own tiny app,
+// not a tab inside the Carrier portal: the person holding this phone is the
+// DRIVER, who may not be the fleet owner signed into the Carrier app at all
+// (see src/models/fleetOwner.js). One job only: start/stop sharing this
+// device's location for whichever trip is currently assigned to this driver.
+import { getDrivers, getTruckById } from "./src/services/fleetService.js";
+import { getTrips } from "./src/services/tripService.js";
+import { ACTIVE_TRIP_STATUSES } from "./src/models/trip.js";
+import {
+  setCurrentDriverId,
+  getCurrentDriverId,
+  clearCurrentDriverId,
+  startDriverTracking,
+  stopDriverTracking,
+  getTrackingState,
+} from "./src/services/trackingService.js";
+
+const C = {
+  bg:     "#0B0B0B",
+  card:   "#151515",
+  border: "#262626",
+  white:  "#FFFFFF",
+  muted:  "#8A8A8A",
+  green:  "#06C167",
+  greenBg:"rgba(6,193,103,0.12)",
+  red:    "#E5484D",
+  redBg:  "rgba(229,72,77,0.12)",
+  amber:  "#E0A639",
+};
+const font = "Inter, -apple-system, BlinkMacSystemFont, sans-serif";
+
+function fmtCoord(value, posLabel, negLabel) {
+  if (typeof value !== "number") return "—";
+  const dir = value >= 0 ? posLabel : negLabel;
+  return `${Math.abs(value).toFixed(4)}° ${dir}`;
+}
+
+function secondsAgo(isoTimestamp) {
+  if (!isoTimestamp) return null;
+  return Math.max(0, Math.round((Date.now() - new Date(isoTimestamp).getTime()) / 1000));
+}
+
+/* ── Step 1: which driver is this device? (no real auth yet — see trackingService.js) ── */
+function DriverPicker({ onPick }) {
+  const [drivers, setDrivers] = useState([]);
+
+  useEffect(() => { getDrivers().then(setDrivers); }, []);
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.bg, color:C.white, fontFamily:font, padding:"32px 20px" }}>
+      <div style={{ fontSize:13, fontWeight:800, letterSpacing:1.5, color:C.green, marginBottom:6 }}>BEHARI DRIVER</div>
+      <div style={{ fontSize:20, fontWeight:700, marginBottom:24 }}>Who's driving?</div>
+      {drivers.length === 0 && <div style={{ color:C.muted, fontSize:14 }}>Loading drivers…</div>}
+      {drivers.map(d => (
+        <button
+          key={d.id}
+          onClick={() => onPick(d.id)}
+          style={{
+            display:"block", width:"100%", textAlign:"left", background:C.card,
+            border:`1px solid ${C.border}`, borderRadius:12, padding:"16px 18px",
+            marginBottom:10, color:C.white, fontFamily:font, cursor:"pointer",
+          }}
+        >
+          <div style={{ fontSize:16, fontWeight:700 }}>{d.name}</div>
+          <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>{d.phone || "—"} · {d.status}</div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ── Step 2: pick the active trip assigned to this driver ── */
+function TripPicker({ driverId, onPick, onSwitchDriver }) {
+  const [trips, setTrips] = useState(null);
+
+  useEffect(() => {
+    getTrips().then(all => {
+      setTrips(all.filter(t => t.driverId === driverId && ACTIVE_TRIP_STATUSES.has(t.status)));
+    });
+  }, [driverId]);
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.bg, color:C.white, fontFamily:font, padding:"32px 20px" }}>
+      <div style={{ fontSize:13, fontWeight:800, letterSpacing:1.5, color:C.green, marginBottom:6 }}>BEHARI DRIVER</div>
+      <div style={{ fontSize:20, fontWeight:700, marginBottom:24 }}>Your active trips</div>
+
+      {trips === null && <div style={{ color:C.muted, fontSize:14 }}>Loading trips…</div>}
+      {trips !== null && trips.length === 0 && (
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:18, color:C.muted, fontSize:14 }}>
+          No active trip is currently assigned to you.
+        </div>
+      )}
+      {trips?.map(t => (
+        <button
+          key={t.id}
+          onClick={() => onPick(t.id)}
+          style={{
+            display:"block", width:"100%", textAlign:"left", background:C.card,
+            border:`1px solid ${C.border}`, borderRadius:12, padding:"16px 18px",
+            marginBottom:10, color:C.white, fontFamily:font, cursor:"pointer",
+          }}
+        >
+          <div style={{ fontSize:12, color:C.muted, marginBottom:4 }}>Trip: {t.loadId}</div>
+          <div style={{ fontSize:16, fontWeight:700 }}>{t.pickup} → {t.delivery}</div>
+          <div style={{ fontSize:12, color:C.green, marginTop:4, fontWeight:700 }}>{t.status}</div>
+        </button>
+      ))}
+
+      <button onClick={onSwitchDriver} style={{ marginTop:20, background:"transparent", border:"none", color:C.muted, fontFamily:font, fontSize:13, textDecoration:"underline", cursor:"pointer" }}>
+        Not you? Switch driver
+      </button>
+    </div>
+  );
+}
+
+/* ── Step 3: the tracker itself — Ready, then Tracking ── */
+function TrackerScreen({ tripId, driverName, onSwitchTrip }) {
+  const [trip, setTrip]   = useState(null);
+  const [truck, setTruck] = useState(null);
+  const [state, setState] = useState(getTrackingState(tripId));
+  const [now, setNow]     = useState(Date.now()); // ticks the "updated Ns ago" label
+
+  useEffect(() => {
+    getTrips().then(all => {
+      const t = all.find(x => x.id === tripId) || null;
+      setTrip(t);
+      if (t?.truckId) getTruckById(t.truckId).then(setTruck);
+    });
+  }, [tripId]);
+
+  // Poll tracking state — trackingService has no event emitter, this is
+  // deliberately the simplest thing that works for a single-screen demo.
+  useEffect(() => {
+    const iv = setInterval(() => { setState(getTrackingState(tripId)); setNow(Date.now()); }, 1000);
+    return () => clearInterval(iv);
+  }, [tripId]);
+
+  useEffect(() => () => stopDriverTracking(tripId), [tripId]); // stop on unmount
+
+  const handleStart = useCallback(async () => {
+    const result = await startDriverTracking(tripId);
+    setState(getTrackingState(tripId));
+    if (!result.started) {
+      // eslint-disable-next-line no-alert
+      alert(result.reason);
+    }
+  }, [tripId]);
+
+  const handleStop = useCallback(() => {
+    stopDriverTracking(tripId);
+    setState(getTrackingState(tripId));
+  }, [tripId]);
+
+  if (!trip) {
+    return <div style={{ minHeight:"100vh", background:C.bg, color:C.muted, fontFamily:font, padding:32 }}>Loading trip…</div>;
+  }
+
+  const isTracking = state.status === "tracking" || state.status === "requesting-permission";
+  const loc  = state.lastUpdate;
+  const ago  = secondsAgo(loc?.timestamp);
+
+  return (
+    <div style={{ minHeight:"100vh", background:C.bg, color:C.white, fontFamily:font, padding:"28px 20px 40px", display:"flex", flexDirection:"column" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:28 }}>
+        <div style={{ width:9, height:9, borderRadius:"50%", background: isTracking ? C.green : C.muted, boxShadow: isTracking ? `0 0 10px ${C.green}` : "none" }} />
+        <div style={{ fontSize:13, fontWeight:800, letterSpacing:1.2 }}>
+          {isTracking ? "TRACKING" : state.status === "error" ? "ERROR" : "READY"}
+        </div>
+        <div style={{ marginLeft:"auto" }}>
+          <button onClick={onSwitchTrip} style={{ background:"transparent", border:"none", color:C.muted, fontFamily:font, fontSize:12, textDecoration:"underline", cursor:"pointer" }}>
+            Switch trip
+          </button>
+        </div>
+      </div>
+
+      {!isTracking && (
+        <>
+          <div style={{ fontSize:12, color:C.muted, marginBottom:4 }}>Trip: {trip.loadId}</div>
+          <div style={{ fontSize:22, fontWeight:800, marginBottom:2 }}>{truck?.plate || "—"}</div>
+          <div style={{ fontSize:14, color:C.muted, marginBottom:24 }}>{trip.pickup} → {trip.delivery}</div>
+
+          <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginBottom:24 }}>
+            <div style={{ fontSize:11, color:C.muted, fontWeight:700, letterSpacing:1, marginBottom:6 }}>GPS</div>
+            <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:15, fontWeight:700 }}>
+              <span style={{ width:8, height:8, borderRadius:"50%", background: state.status==="error" ? C.red : C.amber }} />
+              {state.status === "error" ? "Error" : "Ready"}
+            </div>
+            {state.error && <div style={{ color:C.red, fontSize:12, marginTop:8 }}>{state.error}</div>}
+          </div>
+        </>
+      )}
+
+      {isTracking && (
+        <>
+          <div style={{ fontSize:22, fontWeight:800, marginBottom:2 }}>{truck?.plate || "—"}</div>
+          <div style={{ fontSize:14, color:C.muted, marginBottom:24 }}>{driverName}</div>
+
+          <div style={{ fontSize:26, fontWeight:800, lineHeight:1.3, marginBottom:20 }}>
+            {loc ? fmtCoord(loc.lat, "N", "S") : "Waiting for signal…"}
+            {loc && <><br />{fmtCoord(loc.lng, "E", "W")}</>}
+          </div>
+
+          <div style={{ display:"flex", gap:10, marginBottom:24 }}>
+            <div style={{ flex:1, background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"12px 14px" }}>
+              <div style={{ fontSize:11, color:C.muted, fontWeight:700, letterSpacing:0.5 }}>SPEED</div>
+              <div style={{ fontSize:17, fontWeight:800, marginTop:4 }}>{loc ? `${Math.round(loc.speed)} km/h` : "—"}</div>
+            </div>
+            <div style={{ flex:1, background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"12px 14px" }}>
+              <div style={{ fontSize:11, color:C.muted, fontWeight:700, letterSpacing:0.5 }}>ACCURACY</div>
+              <div style={{ fontSize:17, fontWeight:800, marginTop:4 }}>{loc?.accuracy != null ? `${Math.round(loc.accuracy)} m` : "—"}</div>
+            </div>
+          </div>
+
+          <div style={{ fontSize:12, color:C.muted, marginBottom:24 }}>
+            Updated {ago != null ? `${ago} sec ago` : "—"}
+          </div>
+          {state.error && (
+            <div style={{ background:C.redBg, color:C.red, fontSize:12, borderRadius:8, padding:"10px 12px", marginBottom:16 }}>
+              Last reading flagged: {state.error}
+            </div>
+          )}
+        </>
+      )}
+
+      <div style={{ marginTop:"auto" }}>
+        {!isTracking ? (
+          <>
+            <button
+              onClick={handleStart}
+              style={{ width:"100%", background:C.green, color:"#00220F", border:"none", borderRadius:12, padding:"18px", fontSize:16, fontWeight:800, fontFamily:font, cursor:"pointer" }}
+            >
+              START TRIP TRACKING
+            </button>
+            <div style={{ textAlign:"center", fontSize:12, color:C.muted, marginTop:12 }}>Location permission required</div>
+          </>
+        ) : (
+          <button
+            onClick={handleStop}
+            style={{ width:"100%", background:"transparent", color:C.red, border:`1.5px solid ${C.red}`, borderRadius:12, padding:"18px", fontSize:16, fontWeight:800, fontFamily:font, cursor:"pointer" }}
+          >
+            STOP TRACKING
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Root ─────────────────────────────────────────────────── */
+export default function BehariDriverTracker() {
+  const [driverId, setDriverId] = useState(() => getCurrentDriverId());
+  const [driverName, setDriverName] = useState("");
+  const [tripId, setTripId] = useState(null);
+
+  useEffect(() => {
+    if (!driverId) return;
+    getDrivers().then(all => setDriverName(all.find(d => d.id === driverId)?.name || ""));
+  }, [driverId]);
+
+  function pickDriver(id) {
+    setCurrentDriverId(id);
+    setDriverId(id);
+    setTripId(null);
+  }
+
+  function switchDriver() {
+    clearCurrentDriverId();
+    setDriverId(null);
+    setTripId(null);
+  }
+
+  if (!driverId) return <DriverPicker onPick={pickDriver} />;
+  if (!tripId)   return <TripPicker driverId={driverId} onPick={setTripId} onSwitchDriver={switchDriver} />;
+  return <TrackerScreen tripId={tripId} driverName={driverName} onSwitchTrip={() => setTripId(null)} />;
+}
