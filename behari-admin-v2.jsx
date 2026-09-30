@@ -11,6 +11,12 @@ import { getAllKnownLoads, toAdminLoadView } from "./src/services/loadViews.js";
 // Matching engine — pure model function + shared stats component
 import { scoreMatch } from "./src/models/match.js";
 import NetworkStats from "./src/components/matching/NetworkStats.jsx";
+// Phase 4G — real backend GPS (Phase 4F). Truck/driver names are resolved
+// from the frontend's own fleetService (still localStorage, per 4F/4G's
+// scope boundary — only the tracking trust boundary moved to the backend)
+// since the backend's Trip rows only carry ids.
+import { useAllLiveTrips } from "./src/hooks/useLiveTrip.js";
+import { getTrucks, getDrivers } from "./src/services/fleetService.js";
 
 /* ── Design tokens — sourced from shared constants ───────────────────────── */
 const C        = C_SHARED;
@@ -1572,6 +1578,78 @@ function corridorTownMatch(name, corridor) {
   return corridor.waypoints.some(w => nl.includes(w.label.split(",")[0].toLowerCase()));
 }
 
+/** Phase 4G.4 — live operations view over every backend-tracked trip. */
+function AdminActiveTrips() {
+  const { trips, loading, error } = useAllLiveTrips();
+  const [fleet, setFleet] = useState({ trucks: [], drivers: [] });
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("All");
+
+  useEffect(() => {
+    Promise.all([getTrucks(), getDrivers()]).then(([trucks, drivers]) => setFleet({ trucks, drivers }));
+  }, []);
+
+  function plateFor(truckId) { return fleet.trucks.find(t => t.id === truckId)?.plate || truckId; }
+  function nameFor(driverId) { return fleet.drivers.find(d => d.id === driverId)?.name || driverId; }
+
+  const rows = trips.map(({ trip, location }) => ({
+    trip, location,
+    plate: plateFor(trip.truckId),
+    driverName: nameFor(trip.driverId),
+  }));
+
+  const statuses = ["All", ...new Set(rows.map(r => r.trip.status))];
+  const q = query.trim().toLowerCase();
+  const filtered = rows.filter(r => {
+    if (statusFilter !== "All" && r.trip.status !== statusFilter) return false;
+    if (!q) return true;
+    const haystack = `${r.plate} ${r.driverName} ${r.trip.pickup} ${r.trip.delivery} ${r.trip.loadId} ${r.trip.id}`.toLowerCase();
+    return haystack.includes(q);
+  });
+
+  return (
+    <>
+      <SectionHead label="Active Trips (Live)" color={C.green} />
+      <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+        <input
+          value={query} onChange={e=>setQuery(e.target.value)} placeholder="Filter by truck, driver, route, trip…"
+          style={{ flex:1, padding:"9px 12px", fontSize:13, fontFamily:font, border:`1px solid ${C.border}`, borderRadius:8, outline:"none" }}
+        />
+        <select
+          value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}
+          style={{ padding:"9px 10px", fontSize:13, fontFamily:font, border:`1px solid ${C.border}`, borderRadius:8, outline:"none", background:C.white }}
+        >
+          {statuses.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+
+      {loading && <div style={{ textAlign:"center", padding:16, color:C.muted, fontSize:13 }}>Loading live trips…</div>}
+      {error && <div style={{ ...card, padding:14, color:C.red, fontSize:13, marginBottom:16 }}>Live tracking backend unavailable: {error}</div>}
+      {!loading && !error && filtered.length === 0 && (
+        <div style={{ ...card, padding:20, textAlign:"center", color:C.muted, fontSize:13, marginBottom:16 }}>No trips match.</div>
+      )}
+      {!loading && filtered.map(({ trip, location, plate, driverName }) => {
+        const ago = location ? Math.max(0, Math.round((Date.now() - new Date(location.timestamp).getTime())/1000)) : null;
+        return (
+          <div key={trip.id} style={{ ...card, padding:"12px 14px", marginBottom:8, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div>
+              <div style={{ fontSize:13, fontWeight:800, color:C.black }}>{plate} <span style={{ color:C.muted, fontWeight:600 }}>· {driverName}</span></div>
+              <div style={{ fontSize:11, color:C.secondary, marginTop:2 }}>{trip.pickup} → {trip.delivery} · Trip {trip.loadId || trip.id}</div>
+            </div>
+            <div style={{ textAlign:"right" }}>
+              <div style={{ fontSize:11, fontWeight:800, color:C.green }}>{trip.status}</div>
+              <div style={{ fontSize:10, color:C.muted, marginTop:2 }}>
+                {location ? `${Math.round(location.speed||0)} km/h · ${ago<60?`${ago}s`:`${Math.round(ago/60)}m`} ago` : "no location yet"}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      <div style={{ height:16 }} />
+    </>
+  );
+}
+
 function NetworkCommand({ networkStats = {}, truckAvailabilities = [], matchingCargoPool = [], onGetUnmatchedTrucks = ()=>Promise.resolve([]), onGetUnmatchedCargo = ()=>Promise.resolve([]), corridors = [] }) {
   const [unmatchedTrucks, setUnmatchedTrucks] = useState([]);
   const [unmatchedCargo,  setUnmatchedCargo]  = useState([]);
@@ -1602,6 +1680,8 @@ function NetworkCommand({ networkStats = {}, truckAvailabilities = [], matchingC
 
   return (
     <>
+      <AdminActiveTrips />
+
       <NetworkStats stats={networkStats} />
       <div style={{ height:16 }} />
 

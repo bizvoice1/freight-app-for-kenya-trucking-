@@ -10,7 +10,7 @@
 
 import bcrypt from "bcryptjs";
 import { db, sqlite } from "./client.js";
-import { fleetOwners, trucks, drivers, trips, users } from "./schema.js";
+import { fleetOwners, trucks, drivers, trips, locationUpdates, users } from "./schema.js";
 import { DEMO_FLEET_OWNER, FLEET_SEED_TRUCKS, FLEET_SEED_DRIVERS } from "../../../src/data/fleetSeed.js";
 import { createTrip, TRIP_STATUS } from "../../../src/models/trip.js";
 
@@ -75,8 +75,26 @@ async function seed() {
   );
   db.insert(trips).values({
     ...demoTrip,
-    status: TRIP_STATUS.DISPATCHED,
+    status: TRIP_STATUS.IN_TRANSIT, // realistic demo state for Phase 4G's tracking UI
     startedAt: demoTrip.createdAt,
+    latestLocationId: "LOC-SEED-1",
+  }).onConflictDoNothing().run();
+
+  // One initial location so Phase 4G's tracking UI has something to show
+  // before any real device/simulator tick ever runs — somewhere along the
+  // Eldoret-ish stretch toward Kampala, not literally at the pickup point.
+  db.insert(locationUpdates).values({
+    id: "LOC-SEED-1",
+    tripId: demoTrip.id,
+    truckId: kdj.id,
+    driverId: james.id,
+    lat: 0.5143,
+    lng: 35.2698,
+    accuracy: 12,
+    speed: 58,
+    heading: 310,
+    source: "simulation",
+    timestamp: new Date().toISOString(),
   }).onConflictDoNothing().run();
 
   // One login per seeded driver, plus a shipper and an admin dev account —

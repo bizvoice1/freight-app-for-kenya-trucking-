@@ -22,6 +22,14 @@ import TruckAvailabilityForm from "./src/components/matching/TruckAvailabilityFo
 import MatchCard from "./src/components/matching/MatchCard.jsx";
 import EmptyReturnOpportunity from "./src/components/matching/EmptyReturnOpportunity.jsx";
 import NearbyList from "./src/components/matching/NearbyList.jsx";
+// Phase 4G.3 — Transporter/Fleet tracking. fleetService.js (Phase 4B) has
+// never been wired into this portal's UI before now — CARRIER_FLEET above
+// is the legacy display-only list (see src/data/fleetSeed.js's own note on
+// the two disconnected fleet representations); this is the real
+// Truck/Driver assignment layer, with live GPS layered on top of it here.
+import { getTrucks, getDrivers } from "./src/services/fleetService.js";
+import { useLiveTripByTruckId } from "./src/hooks/useLiveTrip.js";
+import LiveTrackingPanel from "./src/components/tracking/LiveTrackingPanel.jsx";
 
 /* ── UBER FREIGHT DESIGN TOKENS ─────────────────────────── */
 const C = {
@@ -2257,6 +2265,54 @@ function fmtAvailShort(iso) {
 
 const MY_CARRIER_ID_MT = "CARRIER-001";
 
+/** Phase 4G.3 — one truck row; expands to live GPS if it has an active backend trip. */
+function MyFleetTruckRow({ truck, driverName }) {
+  const [expanded, setExpanded] = useState(false);
+  const live = useLiveTripByTruckId(truck.id);
+  const statusColor = truck.status === "Available" ? C.green : truck.status === "Maintenance" ? C.red : C.blue;
+
+  return (
+    <div style={{ ...card, padding:"12px 14px", marginBottom:8 }}>
+      <div
+        style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor: live.trip ? "pointer" : "default" }}
+        onClick={() => live.trip && setExpanded(v => !v)}
+      >
+        <div>
+          <div style={{ fontSize:14, fontWeight:800, color:C.black }}>{truck.plate}</div>
+          {driverName && <div style={{ fontSize:11, color:C.secondary, marginTop:2 }}>{driverName}</div>}
+        </div>
+        <div style={{ textAlign:"right" }}>
+          <span style={{ fontSize:11, fontWeight:700, color:statusColor }}>{truck.status}</span>
+          {live.trip && <div style={{ fontSize:10, color:C.muted, marginTop:2 }}>{expanded ? "▲ hide" : "▼ live"}</div>}
+        </div>
+      </div>
+      {expanded && live.trip && (
+        <div style={{ marginTop:10 }}>
+          <LiveTrackingPanel {...live} truckPlate={truck.plate} compact={false} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Phase 4G.3 — the real Truck/Driver assignment roster (fleetService.js, Phase 4B), not the legacy CARRIER_FLEET display list. */
+function MyFleetLive() {
+  const [trucks, setTrucks]   = useState([]);
+  const [drivers, setDrivers] = useState([]);
+
+  useEffect(() => { getTrucks().then(setTrucks); getDrivers().then(setDrivers); }, []);
+
+  if (trucks.length === 0) return null;
+  return (
+    <div style={{ marginBottom:16 }}>
+      <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",marginBottom:8 }}>My Fleet</div>
+      {trucks.map(t => (
+        <MyFleetTruckRow key={t.id} truck={t} driverName={drivers.find(d => d.id === t.currentDriverId)?.name || null} />
+      ))}
+    </div>
+  );
+}
+
 function MyTruck({ allLoads = [], truckAvailabilities = [], onDeclareAvailability = ()=>{}, onFindMatchesForTruck = ()=>{}, onAcceptMatch = ()=>{}, onBook = ()=>{} }) {
   const [declaring, setDeclaring]         = useState(false);
   const [showForm, setShowForm]           = useState(true);
@@ -2294,6 +2350,7 @@ function MyTruck({ allLoads = [], truckAvailabilities = [], onDeclareAvailabilit
 
   return (
     <div style={{ padding:12 }}>
+      <MyFleetLive />
       {myAvailabilities.length > 0 && (
         <div style={{ marginBottom:12 }}>
           <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",marginBottom:8 }}>Your Declared Availability</div>

@@ -8,10 +8,15 @@
  * Trip CREATION is deliberately not here: there's no POST /api/trips in
  * this phase's scope (see db/seed.js's note) — that stays tripService.js's
  * job on the frontend until a later phase migrates booking/assignment too.
+ *
+ * Phase 4G adds exactly one thing: GET /api/trips (list, filterable) — the
+ * Shipper portal needs "find my trip by loadId", the Admin portal needs
+ * "list every active trip", and both are the same query with different
+ * filters. Not a new GPS system, just the read side 4F was missing.
  */
 
 import { Router } from "express";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, and } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { trips, locationUpdates } from "../db/schema.js";
 import { requireAuth, requireRole } from "../auth/middleware.js";
@@ -42,6 +47,29 @@ async function getTripOr404(req, res) {
 function ownsTrip(req, trip) {
   return req.user.role === "driver" && req.user.driverId === trip.driverId;
 }
+
+/**
+ * GET /api/trips?loadId=&truckId=&driverId=&status=
+ * Any authenticated role may read. No filters -> every trip. This is
+ * intentionally open (any role sees any trip) — per-shipper/per-owner
+ * ownership scoping is a Phase 4H concern once loads/bookings themselves
+ * live on the backend; today nothing on the backend knows which shipper a
+ * load belongs to.
+ */
+router.get("/", async (req, res) => {
+  const { loadId, truckId, driverId, status } = req.query;
+  const conditions = [];
+  if (loadId)   conditions.push(eq(trips.loadId, loadId));
+  if (truckId)  conditions.push(eq(trips.truckId, truckId));
+  if (driverId) conditions.push(eq(trips.driverId, driverId));
+  if (status)   conditions.push(eq(trips.status, status));
+
+  const rows = conditions.length
+    ? await db.select().from(trips).where(and(...conditions))
+    : await db.select().from(trips);
+
+  res.json(rows);
+});
 
 /* GET /api/trips/:tripId — any authenticated role may read */
 router.get("/:tripId", async (req, res) => {

@@ -12,6 +12,12 @@ import { CARRIER_RATING_DIMS } from "./src/models/rating.js";
 // Matching engine — shared UI components (Truck ↔ Cargo)
 import MatchCard from "./src/components/matching/MatchCard.jsx";
 import NearbyList from "./src/components/matching/NearbyList.jsx";
+// Phase 4G — real backend GPS (Phase 4F), distinct from the simulated map
+// below it. Most shipments have no backend-tracked trip yet (see
+// backend/README.md's scope note) — LiveTrackingPanel renders "Not
+// currently tracked live" for those rather than pretending otherwise.
+import { useLiveTripByLoadId } from "./src/hooks/useLiveTrip.js";
+import LiveTrackingPanel from "./src/components/tracking/LiveTrackingPanel.jsx";
 
 const C = {
   white:"#FFFFFF", bg:"#F6F6F6", border:"#EBEBEB",
@@ -1940,6 +1946,7 @@ function ShipperDisputeModal({ shipment, onClose, onOpenDispute }) {
 function ShipperTrackingModal({ s, onClose }) {
   const mapRef  = useRef(null);
   const leafRef = useRef(null);
+  const live = useLiveTripByLoadId(s.id); // Phase 4G — real backend GPS, polled every ~7s
   // Simulate progress based on shipment status
   const pctMap = { "In Transit":55,"Arrived":85,"Delivery Confirmed":97,"Loading":20,"Accepted":10 };
   const pct = pctMap[s.status] || 50;
@@ -1998,6 +2005,10 @@ function ShipperTrackingModal({ s, onClose }) {
             <div style={{ fontSize:11,color:C.green,fontWeight:600 }}>{s.status}</div>
           </div>
         </div>
+        <div style={{ padding:"0 18px", marginBottom:14 }}>
+          <LiveTrackingPanel {...live} truckPlate={s.plate} />
+        </div>
+        <div style={{ padding:"0 18px 8px", fontSize:11, color:C.muted, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase" }}>Simulated route</div>
         <div style={{ margin:"0 18px 14px",borderRadius:12,overflow:"hidden",height:220,background:"#17192C" }}>
           <div ref={mapRef} style={{ width:"100%",height:"100%" }} />
         </div>
