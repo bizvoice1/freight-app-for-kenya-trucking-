@@ -13,18 +13,32 @@
  * Shipper portal needs "find my trip by loadId", the Admin portal needs
  * "list every active trip", and both are the same query with different
  * filters. Not a new GPS system, just the read side 4F was missing.
+ *
+ * Phase 4J adds POST /:tripId/status — the backend becomes authoritative
+ * for trip lifecycle transitions instead of the frontend's localStorage
+ * tripService.updateTripStatus() being the only place that ever changed
+ * one. Structural validity (no skipping stages, no post-terminal changes)
+ * reuses models/trip.js's canTransitionTrip() unchanged — that function
+ * already existed and is correct; this phase's actual job is deciding WHO
+ * gets to request which specific transition, which is a new question
+ * canTransitionTrip was never meant to answer.
  */
 
 import { Router } from "express";
 import { eq, asc, and } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { trips, locationUpdates, loads, trucks } from "../db/schema.js";
+import { trips, locationUpdates, loads, trucks, drivers } from "../db/schema.js";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import {
   createLocationUpdate,
   validateLocationReading,
+  canTransitionTrip,
+  TRIP_STATUS,
+  TERMINAL_TRIP_STATUSES,
   ACTIVE_TRIP_STATUSES,
 } from "../../../src/models/trip.js";
+import { TRUCK_STATUS } from "../../../src/models/truck.js";
+import { DRIVER_STATUS } from "../../../src/models/driver.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -87,6 +101,130 @@ async function _visibleTripsFilter(req) {
   }
   return { field: null, values: [] };
 }
+
+/**
+ * Phase 4J — the operational transitions a DRIVER may request themselves.
+ * Deliberately a fixed set of "from->to" pairs, not "any forward move" —
+ * canTransitionTrip() already guarantees sequencing is legal; this decides
+ * whether a driver (as opposed to a transporter/shipper/admin) is the
+ * right actor for that specific step.
+ */
+const DRIVER_TRANSITIONS = new Set([
+  `${TRIP_STATUS.ASSIGNED}->${TRIP_STATUS.DISPATCHED}`,
+  `${TRIP_STATUS.DISPATCHED}->${TRIP_STATUS.AT_PICKUP}`,
+  `${TRIP_STATUS.AT_PICKUP}->${TRIP_STATUS.LOADING}`,
+  `${TRIP_STATUS.LOADING}->${TRIP_STATUS.IN_TRANSIT}`,
+  `${TRIP_STATUS.IN_TRANSIT}->${TRIP_STATUS.AT_DELIVERY}`,
+  `${TRIP_STATUS.AT_DELIVERY}->${TRIP_STATUS.DELIVERED}`,
+]);
+const SHIPPER_CONFIRM_DELIVERY = `${TRIP_STATUS.AT_DELIVERY}->${TRIP_STATUS.DELIVERED}`;
+
+/**
+ * Phase 4J — decides WHO may request a given trip-status transition. This
+ * is deliberately separate from canTransitionTrip(): that function answers
+ * "is Assigned -> Dispatched ever a legal move" (structure); this answers
+ * "is the person asking allowed to make THIS move on THIS trip" (identity +
+ * role). Both must pass.
+ *
+ *   driver      — only their own trip; only the fixed operational sequence
+ *                 above (no cancelling — that's a transporter/admin action)
+ *   fleet_owner — only a trip on a truck they own; only Cancelled (an
+ *                 "operational exception", not a normal advance — a desk
+ *                 click should never substitute for the driver's own report
+ *                 of reaching a stage)
+ *   shipper     — only a trip on a load they posted; only confirming
+ *                 delivery (At Delivery -> Delivered) — "should generally
+ *                 not arbitrarily change the driver's operational status"
+ *   admin       — any trip, any structurally-valid transition (a
+ *                 "controlled override": still gated by canTransitionTrip,
+ *                 just not by per-trip ownership)
+ *
+ * @returns {Promise<{ok:true}|{ok:false, code:number, error:string}>}
+ */
+async function authorizeTransition(req, trip, nextStatus) {
+  const key = `${trip.status}->${nextStatus}`;
+
+  if (req.user.role === "admin") return { ok: true };
+
+  if (req.user.role === "driver") {
+    if (req.user.driverId !== trip.driverId) {
+      return { ok: false, code: 403, error: "This trip is not assigned to the authenticated driver." };
+    }
+    if (!DRIVER_TRANSITIONS.has(key)) {
+      return { ok: false, code: 403, error: `Drivers may not perform the ${trip.status} -> ${nextStatus} transition.` };
+    }
+    return { ok: true };
+  }
+
+  if (req.user.role === "fleet_owner") {
+    const [truck] = await db.select().from(trucks).where(eq(trucks.id, trip.truckId));
+    if (!truck || truck.ownerId !== req.user.fleetOwnerId) {
+      return { ok: false, code: 403, error: "This trip does not use a truck belonging to the authenticated transporter." };
+    }
+    if (nextStatus !== TRIP_STATUS.CANCELLED) {
+      return { ok: false, code: 403, error: "Transporters may only cancel a trip, not advance its status." };
+    }
+    return { ok: true };
+  }
+
+  if (req.user.role === "shipper") {
+    if (!trip.loadId) return { ok: false, code: 403, error: "This trip has no associated load." };
+    const [load] = await db.select().from(loads).where(eq(loads.id, trip.loadId));
+    if (!load || load.shipperId !== req.user.id) {
+      return { ok: false, code: 403, error: "This trip is not for a load belonging to the authenticated shipper." };
+    }
+    if (key !== SHIPPER_CONFIRM_DELIVERY) {
+      return { ok: false, code: 403, error: "Shippers may only confirm delivery (At Delivery -> Delivered)." };
+    }
+    return { ok: true };
+  }
+
+  return { ok: false, code: 403, error: "This role may not update trip status." };
+}
+
+/** Mirrors tripService.js's _releaseFleetAssignment on the frontend — frees the truck+driver once a trip ends. */
+async function releaseFleetAssignment(truckId) {
+  const [truck] = await db.select().from(trucks).where(eq(trucks.id, truckId));
+  if (!truck || !truck.currentDriverId) return;
+  const driverId = truck.currentDriverId;
+  await db.update(trucks).set({ currentDriverId: null, status: TRUCK_STATUS.AVAILABLE }).where(eq(trucks.id, truckId));
+  await db.update(drivers).set({ assignedTruckId: null, status: DRIVER_STATUS.AVAILABLE }).where(eq(drivers.id, driverId));
+}
+
+/**
+ * POST /api/trips/:tripId/status
+ * body: { status }
+ *
+ * Order matters: authorize WHO before validating WHETHER. A driver trying
+ * an illegal transition on someone else's trip should get 403 (not
+ * authorized), not 409 (invalid transition) — the ownership question is
+ * more fundamental than the sequencing question.
+ */
+router.post("/:tripId/status", async (req, res) => {
+  const trip = await getTripOr404(req, res);
+  if (!trip) return;
+
+  const { status: nextStatus } = req.body || {};
+  if (!nextStatus) return res.status(400).json({ error: "status is required." });
+
+  const auth = await authorizeTransition(req, trip, nextStatus);
+  if (!auth.ok) return res.status(auth.code).json({ error: auth.error });
+
+  if (!canTransitionTrip(trip.status, nextStatus)) {
+    return res.status(409).json({ error: `Cannot move trip ${trip.id} from ${trip.status} to ${nextStatus}.` });
+  }
+
+  const now = new Date().toISOString();
+  const updates = { status: nextStatus, updatedAt: now };
+  if (nextStatus === TRIP_STATUS.DISPATCHED && !trip.startedAt) updates.startedAt = now;
+  if (TERMINAL_TRIP_STATUSES.has(nextStatus)) updates.completedAt = now;
+
+  await db.update(trips).set(updates).where(eq(trips.id, trip.id));
+  if (TERMINAL_TRIP_STATUSES.has(nextStatus)) await releaseFleetAssignment(trip.truckId);
+
+  const [updated] = await db.select().from(trips).where(eq(trips.id, trip.id));
+  res.json(updated);
+});
 
 /**
  * GET /api/trips?loadId=&truckId=&driverId=&status=

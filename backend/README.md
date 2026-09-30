@@ -1,10 +1,48 @@
-# Behari Freight — Backend (Phases 4F–4I)
+# Behari Freight — Backend (Phases 4F–4J)
 
 Real backend: auth, GPS tracking (4F), shared live-tracking reads (4G), the
-real Load → Booking → Trip chain (4H), and authorization hardening (4I) —
-every read and write is now scoped to the resource's actual owner, not just
-gated behind "has a valid token." All server-identity-checked, all in one
-SQLite (dev)/Postgres-ready database.
+real Load → Booking → Trip chain (4H), authorization hardening (4I), and now
+a server-authoritative trip lifecycle (4J) — the frontend's localStorage
+tripService.updateTripStatus() is no longer the only place a trip's status
+can legally change. All server-identity-checked, all in one SQLite (dev)/
+Postgres-ready database.
+
+## Server-side trip lifecycle (Phase 4J)
+
+`POST /api/trips/:tripId/status` `{ status }` is now the one place a trip
+moves through `Assigned → Dispatched → At Pickup → Loading → In Transit →
+At Delivery → Delivered` (or `Cancelled`). Two independent questions, both
+enforced, in this order:
+
+1. **Who may request this specific move** (`authorizeTransition` in
+   `routes/trips.js`) — a role/ownership question this phase adds:
+
+   | Actor | Allowed transitions |
+   |---|---|
+   | Driver (owns the trip) | the six operational steps, in order — not Cancelled |
+   | Transporter (owns the truck) | Cancelled only, from any active state — an operational *exception*, not a substitute for the driver's own reporting |
+   | Shipper (owns the load) | At Delivery → Delivered only — confirming receipt, never advancing operational state |
+   | Admin | any trip, any structurally-valid move — a "controlled override" |
+
+2. **Whether the move is structurally legal** — reuses `models/trip.js`'s
+   existing `canTransitionTrip()` unchanged (no skipping stages, nothing
+   after a terminal state). This function already existed and was already
+   correct; 4J's job was deciding *who*, not re-deciding *whether*.
+
+Ownership fails closed as `403`, an illegal sequence as `409`, a missing
+trip as `404` — checked in that order, so a driver attempting an
+out-of-turn move on someone else's trip gets "not authorized," not a
+generic "invalid transition."
+
+Reaching a terminal state (`Delivered`/`Cancelled`) frees the truck+driver
+back to `Available` (`releaseFleetAssignment`), mirroring exactly what
+`tripService.js` already does on the frontend.
+
+Verified: the full happy path end-to-end (driver-driven `Assigned` through
+`At Delivery`, shipper-confirmed `Delivered`, fleet correctly freed after),
+plus all four named failure cases — stage-skipping, post-terminal changes,
+a driver touching another driver's trip, a transporter touching another
+transporter's truck — each rejected with the right status code.
 
 ## Authenticated ≠ Authorized (Phase 4I)
 
