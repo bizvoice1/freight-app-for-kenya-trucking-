@@ -34,18 +34,54 @@ function ownsBooking(req, booking) {
   return req.user.role === "fleet_owner" && req.user.id === booking.transporterId;
 }
 
+/**
+ * Phase 4I — whether the authenticated caller may VIEW this booking.
+ *   fleet_owner — only their own bookings (they made them)
+ *   shipper     — only bookings against a load they posted
+ *   admin       — everything
+ *   driver      — no legitimate reason to read a booking directly
+ */
+async function canViewBooking(req, booking) {
+  if (req.user.role === "admin") return true;
+  if (req.user.role === "fleet_owner") return req.user.id === booking.transporterId;
+  if (req.user.role === "shipper") {
+    const [load] = await db.select().from(loads).where(eq(loads.id, booking.loadId));
+    return !!load && load.shipperId === req.user.id;
+  }
+  return false;
+}
+
 router.get("/", async (req, res) => {
   const { transporterId, loadId, status } = req.query;
+
+  if (req.user.role === "fleet_owner" && transporterId && transporterId !== req.user.id) {
+    return res.status(403).json({ error: "Transporters may only list their own bookings." });
+  }
+
   let rows = await db.select().from(bookings);
   if (transporterId) rows = rows.filter(b => b.transporterId === transporterId);
   if (loadId)        rows = rows.filter(b => b.loadId === loadId);
   if (status)        rows = rows.filter(b => b.status === status);
+
+  if (req.user.role === "fleet_owner") {
+    rows = rows.filter(b => b.transporterId === req.user.id);
+  } else if (req.user.role === "shipper") {
+    const ownLoads = await db.select().from(loads).where(eq(loads.shipperId, req.user.id));
+    const ownLoadIds = new Set(ownLoads.map(l => l.id));
+    rows = rows.filter(b => ownLoadIds.has(b.loadId));
+  } else if (req.user.role === "driver") {
+    rows = [];
+  }
+
   res.json(rows);
 });
 
 router.get("/:bookingId", async (req, res) => {
   const booking = await getBookingOr404(req, res);
   if (!booking) return;
+  if (!(await canViewBooking(req, booking))) {
+    return res.status(403).json({ error: "You are not authorized to view this booking." });
+  }
   res.json(booking);
 });
 

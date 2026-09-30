@@ -29,12 +29,30 @@ router.post("/", requireRole("shipper"), async (req, res) => {
   res.status(201).json(load);
 });
 
-/** GET /api/loads?status=&shipperId= — the marketplace listing. Any authenticated role may read. */
+/**
+ * GET /api/loads?status=&shipperId= — the marketplace listing.
+ *
+ * Authorization (4I): a shipper may only ever see their OWN loads —
+ * "browsing the marketplace" isn't a shipper's job, they post loads, they
+ * don't shop for them. A shipper passing someone else's shipperId is
+ * rejected rather than silently overridden, so the client can tell the
+ * difference between "no results" and "not allowed to ask." Transporters,
+ * drivers and admin keep full marketplace visibility — that's the whole
+ * point of a marketplace for them.
+ */
 router.get("/", async (req, res) => {
   const { status, shipperId } = req.query;
+
+  if (req.user.role === "shipper") {
+    if (shipperId && shipperId !== req.user.id) {
+      return res.status(403).json({ error: "Shippers may only list their own loads." });
+    }
+  }
+  const effectiveShipperId = req.user.role === "shipper" ? req.user.id : shipperId;
+
   const conditions = [];
-  if (status)    conditions.push(eq(loads.status, status));
-  if (shipperId) conditions.push(eq(loads.shipperId, shipperId));
+  if (status)             conditions.push(eq(loads.status, status));
+  if (effectiveShipperId) conditions.push(eq(loads.shipperId, effectiveShipperId));
 
   const rows = conditions.length
     ? await db.select().from(loads).where(and(...conditions))
@@ -42,9 +60,19 @@ router.get("/", async (req, res) => {
   res.json(rows);
 });
 
+/**
+ * A shipper may view any of their own loads regardless of status. Any
+ * other role may view any load — a transporter needs to see a load's full
+ * detail to decide whether to accept it, and that's still true after
+ * another transporter has already booked it (they should see it left the
+ * marketplace, not get a 403 for looking).
+ */
 router.get("/:loadId", async (req, res) => {
   const [load] = await db.select().from(loads).where(eq(loads.id, req.params.loadId));
   if (!load) return res.status(404).json({ error: `No load found with id ${req.params.loadId}.` });
+  if (req.user.role === "shipper" && load.shipperId !== req.user.id) {
+    return res.status(403).json({ error: "This load does not belong to the authenticated shipper." });
+  }
   res.json(load);
 });
 

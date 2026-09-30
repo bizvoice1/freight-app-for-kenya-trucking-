@@ -18,9 +18,25 @@ import { requireAuth } from "../auth/middleware.js";
 const router = Router();
 router.use(requireAuth);
 
-/** GET /api/trucks?ownerId= */
+/**
+ * GET /api/trucks?ownerId=
+ * Phase 4I: a transporter has no legitimate reason to browse another
+ * transporter's fleet — unlike loads, there's no marketplace case for it.
+ * A fleet_owner's query is always forced to their own fleetOwnerId,
+ * regardless of what they pass; a mismatched explicit request is rejected
+ * outright so it's visibly a permissions error, not silently ignored.
+ */
 router.get("/trucks", async (req, res) => {
   const { ownerId } = req.query;
+
+  if (req.user.role === "fleet_owner") {
+    if (ownerId && ownerId !== req.user.fleetOwnerId) {
+      return res.status(403).json({ error: "Transporters may only list their own fleet." });
+    }
+    const rows = await db.select().from(trucks).where(eq(trucks.ownerId, req.user.fleetOwnerId));
+    return res.json(rows);
+  }
+
   const rows = ownerId
     ? await db.select().from(trucks).where(eq(trucks.ownerId, ownerId))
     : await db.select().from(trucks);

@@ -18,7 +18,7 @@
 import { Router } from "express";
 import { eq, asc, and } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { trips, locationUpdates } from "../db/schema.js";
+import { trips, locationUpdates, loads, trucks } from "../db/schema.js";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import {
   createLocationUpdate,
@@ -49,32 +49,88 @@ function ownsTrip(req, trip) {
 }
 
 /**
+ * Phase 4I — whether the authenticated caller may VIEW (not drive) a trip.
+ * GPS location is exactly the kind of data "authenticated" must not imply
+ * "authorized" for: a driver's own movements shouldn't be visible to a
+ * stranger just because they too have a valid token.
+ *   driver     — only their own trip (same rule as ownsTrip, for reads too)
+ *   fleet_owner — only a trip whose truck they own
+ *   shipper    — only a trip whose load they posted
+ *   admin      — everything
+ */
+async function canViewTrip(req, trip) {
+  if (req.user.role === "admin") return true;
+  if (req.user.role === "driver") return req.user.driverId === trip.driverId;
+  if (req.user.role === "fleet_owner") {
+    const [truck] = await db.select().from(trucks).where(eq(trucks.id, trip.truckId));
+    return !!truck && truck.ownerId === req.user.fleetOwnerId;
+  }
+  if (req.user.role === "shipper") {
+    if (!trip.loadId) return false;
+    const [load] = await db.select().from(loads).where(eq(loads.id, trip.loadId));
+    return !!load && load.shipperId === req.user.id;
+  }
+  return false;
+}
+
+/** The truckIds/loadIds this caller is allowed to see trips for — used to scope the list endpoint. */
+async function _visibleTripsFilter(req) {
+  if (req.user.role === "admin") return null; // no restriction
+  if (req.user.role === "driver") return { field: "driverId", values: [req.user.driverId] };
+  if (req.user.role === "fleet_owner") {
+    const owned = await db.select().from(trucks).where(eq(trucks.ownerId, req.user.fleetOwnerId));
+    return { field: "truckId", values: owned.map(t => t.id) };
+  }
+  if (req.user.role === "shipper") {
+    const own = await db.select().from(loads).where(eq(loads.shipperId, req.user.id));
+    return { field: "loadId", values: own.map(l => l.id) };
+  }
+  return { field: null, values: [] };
+}
+
+/**
  * GET /api/trips?loadId=&truckId=&driverId=&status=
- * Any authenticated role may read. No filters -> every trip. This is
- * intentionally open (any role sees any trip) — per-shipper/per-owner
- * ownership scoping is a Phase 4H concern once loads/bookings themselves
- * live on the backend; today nothing on the backend knows which shipper a
- * load belongs to.
+ * Scoped per role (see _visibleTripsFilter) before the query filters are
+ * even applied — a driver passing a different driverId, or a transporter
+ * passing a truckId they don't own, simply narrows an already-empty set
+ * rather than leaking someone else's trip.
  */
 router.get("/", async (req, res) => {
   const { loadId, truckId, driverId, status } = req.query;
+
+  const scope = await _visibleTripsFilter(req);
+  if (scope && scope.field && (
+    (scope.field === "driverId" && driverId && !scope.values.includes(driverId)) ||
+    (scope.field === "truckId"  && truckId  && !scope.values.includes(truckId)) ||
+    (scope.field === "loadId"   && loadId   && !scope.values.includes(loadId))
+  )) {
+    return res.status(403).json({ error: "You may only list trips you're authorized to see." });
+  }
+
   const conditions = [];
   if (loadId)   conditions.push(eq(trips.loadId, loadId));
   if (truckId)  conditions.push(eq(trips.truckId, truckId));
   if (driverId) conditions.push(eq(trips.driverId, driverId));
   if (status)   conditions.push(eq(trips.status, status));
 
-  const rows = conditions.length
+  let rows = conditions.length
     ? await db.select().from(trips).where(and(...conditions))
     : await db.select().from(trips);
+
+  if (scope) {
+    rows = scope.field ? rows.filter(t => scope.values.includes(t[scope.field])) : [];
+  }
 
   res.json(rows);
 });
 
-/* GET /api/trips/:tripId — any authenticated role may read */
+/* GET /api/trips/:tripId — scoped to what this caller may view (see canViewTrip) */
 router.get("/:tripId", async (req, res) => {
   const trip = await getTripOr404(req, res);
   if (!trip) return;
+  if (!(await canViewTrip(req, trip))) {
+    return res.status(403).json({ error: "You are not authorized to view this trip." });
+  }
   res.json(trip);
 });
 
@@ -136,18 +192,24 @@ router.post("/:tripId/location", requireRole("driver"), async (req, res) => {
   res.json({ accepted: true, update });
 });
 
-/* GET /api/trips/:tripId/location/latest */
+/* GET /api/trips/:tripId/location/latest — scoped to what this caller may view */
 router.get("/:tripId/location/latest", async (req, res) => {
   const trip = await getTripOr404(req, res);
   if (!trip) return;
+  if (!(await canViewTrip(req, trip))) {
+    return res.status(403).json({ error: "You are not authorized to view this trip's location." });
+  }
   const location = await _latestLocation(trip.id);
   res.json(location || null);
 });
 
-/* GET /api/trips/:tripId/location/history — chronological, isolated to this trip */
+/* GET /api/trips/:tripId/location/history — chronological, isolated to this trip, scoped to what this caller may view */
 router.get("/:tripId/location/history", async (req, res) => {
   const trip = await getTripOr404(req, res);
   if (!trip) return;
+  if (!(await canViewTrip(req, trip))) {
+    return res.status(403).json({ error: "You are not authorized to view this trip's location." });
+  }
   const history = await db
     .select()
     .from(locationUpdates)

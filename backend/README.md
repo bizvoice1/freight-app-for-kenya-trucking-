@@ -1,11 +1,41 @@
-# Behari Freight — Backend (Phases 4F–4H)
+# Behari Freight — Backend (Phases 4F–4I)
 
-Real backend: auth, GPS tracking (4F), shared live-tracking reads (4G), and
-now the real Load → Booking → Trip chain (4H) — a shipper posts a load, a
-transporter accepts it and assigns a truck+driver, the backend creates the
-Trip, the driver tracks from their phone, and any authenticated viewer can
-watch it move. All server-identity-checked, all in one SQLite (dev)/
-Postgres-ready database.
+Real backend: auth, GPS tracking (4F), shared live-tracking reads (4G), the
+real Load → Booking → Trip chain (4H), and authorization hardening (4I) —
+every read and write is now scoped to the resource's actual owner, not just
+gated behind "has a valid token." All server-identity-checked, all in one
+SQLite (dev)/Postgres-ready database.
+
+## Authenticated ≠ Authorized (Phase 4I)
+
+Every prior phase asked "is this token valid?" That's authentication. 4I
+asks the harder question: "does THIS user get to touch THIS resource?"
+
+| Actor | Can | Can't |
+|---|---|---|
+| Shipper | see/manage their own loads | see another shipper's load, even by direct ID |
+| Transporter | browse the marketplace, accept any open load, manage/assign their own trucks | list, assign, or view another transporter's trucks/bookings |
+| Driver | see and act on their own trips/GPS | list or view another driver's trips or location |
+| Admin | see everything | — |
+
+Enforced in `routes/loads.js` (`GET /:loadId`, `GET /`), `routes/fleet.js`
+(`GET /trucks`), `routes/trips.js` (`canViewTrip`/`_visibleTripsFilter` —
+GPS location is exactly the kind of data "authenticated" must not imply
+"authorized" for), and `routes/bookings.js` (`canViewBooking`). The
+existing `/assign`/`/create-trip` ownership checks from 4H already covered
+booking mutation; 4I closes the read side and the fleet side.
+
+Verified against a genuine second tenant on each side — `db/seed.js` now
+seeds a second shipper (Mary Achieng) and a second transporter (Daniel
+Kiplagat, who owns his own truck KDB 700Z, zero overlap with James's
+fleet) specifically so these rejections are testable, not just theoretical.
+Confirmed: Daniel can't list, see, or assign any of James's trucks/bookings;
+Mary can't see Demo Shipper's loads; Peter (driver) can't list or view
+James's trips or GPS location by any means — while the legitimate owner in
+each case, and admin, still see everything correctly. The Phase 4F/4G demo
+trip (`TRP-1000`/`KE-2039`) needed a matching backend `loads` row added
+(owned by Demo Shipper) so this hardening didn't lock the shipper out of
+their own long-standing tracking demo.
 
 ## Scope (deliberately)
 

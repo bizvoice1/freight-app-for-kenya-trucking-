@@ -10,9 +10,10 @@
 
 import bcrypt from "bcryptjs";
 import { db, sqlite } from "./client.js";
-import { fleetOwners, trucks, drivers, trips, locationUpdates, users } from "./schema.js";
+import { fleetOwners, trucks, drivers, trips, locationUpdates, users, loads } from "./schema.js";
 import { DEMO_FLEET_OWNER, FLEET_SEED_TRUCKS, FLEET_SEED_DRIVERS } from "../../../src/data/fleetSeed.js";
 import { createTrip, TRIP_STATUS } from "../../../src/models/trip.js";
+import { createLoad, LOAD_STATUS } from "../domain/load.js";
 
 const DEV_PIN = "1234"; // documented dev-only PIN for every seeded login — see backend/README.md
 
@@ -28,6 +29,16 @@ async function seed() {
     name: DEMO_FLEET_OWNER.name,
     phone: DEMO_FLEET_OWNER.phone,
     company: DEMO_FLEET_OWNER.company || null,
+  }).onConflictDoNothing().run();
+
+  // Phase 4I — a second, wholly separate shipper and transporter, with a
+  // truck of their own. Without a genuine second tenant, "Transporter A
+  // can't touch Transporter B's truck" and "Shipper A can't see Shipper B's
+  // load" are untestable — every prior phase only ever had one of each.
+  db.insert(fleetOwners).values({ id: "FO-1001", name: "Daniel Kiplagat", phone: "0711000000", company: null }).onConflictDoNothing().run();
+  db.insert(trucks).values({
+    id: "TRK-2000", plate: "KDB 700Z", truckType: "Box Truck", capacity: "8T",
+    ownerId: "FO-1001", currentDriverId: null, status: "Available", currentLat: null, currentLng: null,
   }).onConflictDoNothing().run();
 
   const james = driverByName("James Mwangi");
@@ -70,6 +81,21 @@ async function seed() {
     }).onConflictDoNothing().run();
   }
 
+  // Phase 4I needs this: KE-2039 is a frontend-only load (src/data/
+  // seedLoads.js) with no backend loads row of its own — but the shipper-
+  // ownership check on GET /trips(/location) now looks one up via
+  // trip.loadId. Without this row, Demo Shipper would be locked out of the
+  // exact live-tracking demo Phase 4G already proved worked. USR-1002 is
+  // "Demo Shipper" — see the users list below.
+  db.insert(loads).values({
+    ...createLoad(
+      { shipperId: "USR-1002", cargo: "FMCG Goods", origin: "Nairobi EPZ", destination: "Kampala", truckType: "Box Truck" },
+      0
+    ),
+    id: "KE-2039", // must match the seeded trip's loadId below, not the auto-generated BHL- id
+    status: LOAD_STATUS.BOOKED,
+  }).onConflictDoNothing().run();
+
   // One demo trip: mirrors the exact scenario proven end-to-end on the
   // frontend in Phase 4E (James driving KDJ 441Z on load KE-2039).
   // Trip CREATION itself stays a frontend/tripService.js concern for now —
@@ -111,6 +137,8 @@ async function seed() {
     { id: "USR-1002", phone: "0700000001", role: "shipper",    name: "Demo Shipper", driverId: null },
     { id: "USR-1003", phone: "0700000002", role: "admin",      name: "Demo Admin",   driverId: null },
     { id: "USR-1004", phone: DEMO_FLEET_OWNER.phone, role: "fleet_owner", name: DEMO_FLEET_OWNER.name, driverId: null, fleetOwnerId: DEMO_FLEET_OWNER.id },
+    { id: "USR-1005", phone: "0700000003", role: "shipper",     name: "Mary Achieng",   driverId: null },
+    { id: "USR-1006", phone: "0711000000", role: "fleet_owner", name: "Daniel Kiplagat", driverId: null, fleetOwnerId: "FO-1001" },
   ];
 
   for (const u of seedUsers) {
