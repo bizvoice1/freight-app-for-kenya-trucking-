@@ -1,11 +1,82 @@
-# Behari Freight — Backend (Phases 4F–4J)
+# Behari Freight — Backend (Phases 4F–4K)
 
 Real backend: auth, GPS tracking (4F), shared live-tracking reads (4G), the
-real Load → Booking → Trip chain (4H), authorization hardening (4I), and now
-a server-authoritative trip lifecycle (4J) — the frontend's localStorage
-tripService.updateTripStatus() is no longer the only place a trip's status
-can legally change. All server-identity-checked, all in one SQLite (dev)/
+real Load → Booking → Trip chain (4H), authorization hardening (4I), a
+server-authoritative trip lifecycle (4J), and now Daraja M-Pesa escrow (4K)
+— Behari controls the payment lifecycle, not just freight matching and
+tracking. All server-identity-checked, all in one SQLite (dev)/
 Postgres-ready database.
+
+## Daraja M-Pesa + escrow (Phase 4K)
+
+Implemented exactly against `docs/4K-DARAJA-SPEC.md` (Revision 3, commit
+`6f378ac` — approved: escrow state machine, financial invariants, and
+18-case acceptance suite specifically signed off before this was built).
+Five new tables (`payments`, `escrows`, `payouts`, `payment_events`,
+`reconciliation_flags`), kept strictly separate from `trips`/`bookings` —
+zero new columns on either.
+
+**The chain:** Daraja (external rail) → a payment_events row (our own
+record of what Daraja said) → payments/escrows/payouts (derived from
+events, never live-queried from Daraja) → what every portal reads. Trip
+status, payment status, escrow status, and payout status are four separate
+state machines — Booking≠Trip already established this pattern in 4H; 4K
+extends it to money.
+
+**Escrow states** carry an explicit eligibility → instruction → settlement
+split: `ReleasePending` (eligible, nothing sent to Daraja) →
+`ReleaseInProgress` (a B2C request is in flight, unconfirmed) → `Settled`
+(Daraja confirmed it). A trip reaching `Delivered` only ever flips escrow to
+`ReleasePending` — the actual payout is a separate, explicit, admin-only
+`POST /api/escrows/:id/release`. `Delivered` never itself moves money.
+
+**Idempotency and concurrency, at the layer that actually needs it:**
+- `payments.checkoutRequestId`/`payouts.conversationId` — one Daraja
+  request, one callback, ever (a repeat is detected and ignored, not
+  reapplied).
+- `payments.mpesaReceiptNumber`/`payouts.transactionId` — one M-Pesa
+  transaction, one accepted payment/payout, checked cross-attempt (not just
+  against the row being updated).
+- `payouts_one_confirmed_per_escrow` — a partial unique index (Confirmed
+  rows only), not a plain one: a failed payout must stay retryable, so the
+  constraint only ever blocks a *second successful* payout.
+- `payouts_one_inflight_per_escrow` — a second partial index (Pending/
+  Requested rows only) closing a real gap the application check alone
+  can't: two genuinely concurrent `/release` calls can both pass a `SELECT`
+  before either commits an `INSERT` (Node yields at every `await`, and a
+  second in-flight request can run in that gap) — this index is what the
+  database actually enforces on the `INSERT` itself.
+
+**Local simulator, not just the sandbox:** the official Daraja 3.0 sandbox
+is reported happy-path-only as of this spec's research, so
+`services/darajaSimulator.js` fakes STK push/B2C locally and calls back to
+Behari's own real callback routes — same code path a real callback would
+hit. `services/daraja.js` is the one switch point (`DARAJA_ENV=simulate` by
+default); a structurally-complete but **unexercised-in-this-environment**
+sandbox/production path lives alongside it, honestly labelled as such — it
+needs real Safaricom credentials and a public callback tunnel neither of
+which this environment has.
+
+**The two reversal edges** (`PAYMENT_REVERSED` — the original inbound
+payment reversed while still Held; `PAYOUT_REVERSED` — a confirmed payout
+later reversed) are implemented as explicit **admin-triggered manual
+transitions** (`POST /api/escrows/:id/mark-payment-reversed`, `.../mark-
+payout-reversed`), not fabricated Daraja callbacks — the spec flagged both
+as unverified against real Daraja webhook behavior, and this is the
+fallback the spec itself proposed rather than pretending a shape confirmed
+nowhere. Treat both as simulator/manual-only until confirmed against the
+live sandbox.
+
+**Verified:** `npm run test:4k` — the happy path plus all 18 deliberate
+failure cases from the spec's Section 9, including a genuinely concurrent
+release test (two real parallel HTTP requests, not sequential retries) that
+proves the database constraint — not the application's own check — is what
+prevents a double payout. `npm run test:regression` re-verifies every
+pre-4K endpoint family (4F–4J) against the same reordered `app.js` (the two
+unauthenticated webhook routes had to be mounted before `fleetRoutes`,
+whose blanket `router.use(requireAuth)` would otherwise 401 them first).
+Both run against a freshly migrated + seeded database and both pass, 19/19
+and 13/13 respectively, as of this commit.
 
 ## Server-side trip lifecycle (Phase 4J)
 
@@ -82,11 +153,12 @@ tracking (post/latest/history, start/stop), trip lookup (single + filtered
 list), **loads** (post, list, get), **bookings** (accept → assign
 truck+driver → create trip), truck/driver listing.
 
-**Not yet built:** escrow/payment (explicitly deferred to Phase 4K —
-`loads`/`bookings` have no financial columns at all), notifications,
-WebSockets/realtime (polling only, by design — see the frontend's
-`useLiveTrip.js`), production OTP, AI matching, analytics, cosmetic
-redesign. Fleet *assignment* (which driver currently mans which truck) also
+**Not yet built:** notifications, WebSockets/realtime (polling only, by
+design — see the frontend's `useLiveTrip.js`), production OTP, AI matching,
+analytics, cosmetic redesign, and a frontend "Pay now" button (4K's payment
+endpoints exist and are verified; nothing in the UI calls them yet — see
+Phase 4K's own section above). Fleet *assignment* (which driver currently
+mans which truck) also
 stays a frontend/`fleetService.js` concern — the backend only reads its own
 seeded snapshot of that when validating a booking's truck+driver pick.
 
@@ -176,6 +248,21 @@ GET  /api/bookings?transporterId=&loadId=&status=
 GET  /api/bookings/:bookingId
 POST /api/bookings/:bookingId/assign          (fleet_owner, must own the booking) { truckId, driverId }
 POST /api/bookings/:bookingId/create-trip     (fleet_owner, must own the booking) -> creates the Trip
+POST /api/bookings/:bookingId/payment         (shipper, must own the booking's load) { phoneNumber } -- Phase 4K
+
+GET  /api/payments/:id
+GET  /api/payments?bookingId=
+POST /api/payments/callback/stk               (Safaricom/simulator -> us; NOT behind auth)
+
+GET  /api/escrows/:escrowId
+GET  /api/escrows?bookingId=
+POST /api/escrows/:escrowId/release                  (admin only) -> creates the Payout, sends B2C
+POST /api/escrows/:escrowId/mark-payment-reversed    (admin only) -- see Phase 4K's reversal note
+POST /api/escrows/:escrowId/mark-payout-reversed     (admin only) -- see Phase 4K's reversal note
+
+GET  /api/payouts/:id
+GET  /api/payouts?escrowId=
+POST /api/payouts/callback/b2c                (Safaricom/simulator -> us; NOT behind auth)
 ```
 
 ## Load → Booking → Trip: the defining test

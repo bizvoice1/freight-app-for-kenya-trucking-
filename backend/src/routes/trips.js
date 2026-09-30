@@ -27,7 +27,7 @@
 import { Router } from "express";
 import { eq, asc, and } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { trips, locationUpdates, loads, trucks, drivers } from "../db/schema.js";
+import { trips, locationUpdates, loads, trucks, drivers, bookings, escrows } from "../db/schema.js";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import {
   createLocationUpdate,
@@ -39,6 +39,8 @@ import {
 } from "../../../src/models/trip.js";
 import { TRUCK_STATUS } from "../../../src/models/truck.js";
 import { DRIVER_STATUS } from "../../../src/models/driver.js";
+import { ESCROW_STATUS, evaluateReleaseEligibility } from "../domain/escrow.js";
+import { logPaymentEvent } from "../services/ledger.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -192,6 +194,28 @@ async function releaseFleetAssignment(truckId) {
 }
 
 /**
+ * Phase 4K-D (docs/4K-DARAJA-SPEC.md Section 5) — the moment a trip reaches
+ * Delivered, check whether its escrow may move to RELEASE_PENDING. This is
+ * ONLY a status flip + audit log if eligible; it never touches Daraja. No
+ * booking (a trip without one) or no escrow (payment never completed) are
+ * both legitimate "not eligible" outcomes, not errors.
+ */
+async function maybeMakeEscrowEligibleForRelease(trip) {
+  if (!trip.bookingId) return;
+  const [booking] = await db.select().from(bookings).where(eq(bookings.id, trip.bookingId));
+  if (!booking) return;
+  const [escrow] = await db.select().from(escrows).where(eq(escrows.bookingId, booking.id));
+  const [load] = booking.loadId ? await db.select().from(loads).where(eq(loads.id, booking.loadId)) : [null];
+
+  const decision = evaluateReleaseEligibility({ trip, booking, escrow: escrow || null, loadPrice: load?.price ?? null });
+  if (!decision.eligible) return;
+
+  const now = new Date().toISOString();
+  await db.update(escrows).set({ status: ESCROW_STATUS.RELEASE_PENDING, releasePendingAt: now, updatedAt: now }).where(eq(escrows.id, escrow.id));
+  await logPaymentEvent("escrow", escrow.id, "status_changed", ESCROW_STATUS.HELD, ESCROW_STATUS.RELEASE_PENDING, { tripId: trip.id });
+}
+
+/**
  * POST /api/trips/:tripId/status
  * body: { status }
  *
@@ -221,6 +245,7 @@ router.post("/:tripId/status", async (req, res) => {
 
   await db.update(trips).set(updates).where(eq(trips.id, trip.id));
   if (TERMINAL_TRIP_STATUSES.has(nextStatus)) await releaseFleetAssignment(trip.truckId);
+  if (nextStatus === TRIP_STATUS.DELIVERED) await maybeMakeEscrowEligibleForRelease({ ...trip, ...updates });
 
   const [updated] = await db.select().from(trips).where(eq(trips.id, trip.id));
   res.json(updated);

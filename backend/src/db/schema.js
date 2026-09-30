@@ -25,7 +25,8 @@
  *     identically once the column type becomes Postgres `timestamptz`.
  */
 
-import { sqliteTable, text, real, unique } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, real, integer, unique, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
 export const fleetOwners = sqliteTable("fleet_owners", {
   id:      text("id").primaryKey(),
@@ -152,4 +153,111 @@ export const loads = sqliteTable("loads", {
   status:      text("status").notNull(), // "Open" | "Booked" | "Cancelled"
   createdAt:   text("created_at").notNull(),
   updatedAt:   text("updated_at").notNull(),
+});
+
+/**
+ * Phase 4K — Daraja M-Pesa + escrow. Five new tables, per
+ * docs/4K-DARAJA-SPEC.md (Revision 3, approved) Section 2. Zero changes to
+ * `trips`/`bookings` above — money entities reference them by id.
+ *
+ * checkoutRequestId/conversationId are nullable at the SCHEMA level even
+ * though the spec's table doesn't say so explicitly: both are set only
+ * after the synchronous Daraja response (Section 3 step 4 / Section 6 step
+ * 5), so the row briefly exists without one. SQLite's default unique-index
+ * behaviour treats multiple NULLs as non-conflicting, so this costs nothing
+ * against the "idempotency key" invariant — the constraint still holds for
+ * every row once its id IS set.
+ */
+export const payments = sqliteTable("payments", {
+  id:                 text("id").primaryKey(),
+  bookingId:          text("booking_id").notNull(),
+  shipperId:          text("shipper_id").notNull(),
+  amount:             real("amount").notNull(),
+  phoneNumber:        text("phone_number").notNull(),
+  status:             text("status").notNull(), // Pending|StkSent|Paid|Failed|Cancelled|Timeout
+  merchantRequestId:  text("merchant_request_id"),
+  checkoutRequestId:  text("checkout_request_id"),
+  mpesaReceiptNumber: text("mpesa_receipt_number"),
+  resultCode:         integer("result_code"),
+  resultDesc:         text("result_desc"),
+  createdAt:          text("created_at").notNull(),
+  updatedAt:          text("updated_at").notNull(),
+}, (table) => ({
+  checkoutRequestIdUnique:  uniqueIndex("payments_checkout_request_id_unique").on(table.checkoutRequestId),
+  mpesaReceiptNumberUnique: uniqueIndex("payments_mpesa_receipt_number_unique").on(table.mpesaReceiptNumber),
+}));
+
+export const escrows = sqliteTable("escrows", {
+  id:                  text("id").primaryKey(),
+  bookingId:           text("booking_id").notNull(),
+  paymentId:           text("payment_id"),
+  amount:              real("amount"),
+  status:              text("status").notNull(), // see domain/escrow.js
+  heldAt:              text("held_at"),
+  releasePendingAt:    text("release_pending_at"),
+  releaseInProgressAt: text("release_in_progress_at"),
+  settledAt:           text("settled_at"),
+  createdAt:           text("created_at").notNull(),
+  updatedAt:           text("updated_at").notNull(),
+}, (table) => ({
+  bookingIdUnique: uniqueIndex("escrows_booking_id_unique").on(table.bookingId),
+}));
+
+/**
+ * One row per B2C payout ATTEMPT — unlimited attempts per escrow, but two
+ * partial unique indexes make certain outcomes physically impossible rather
+ * than merely application-checked (see 4K-DARAJA-SPEC.md Section 2's two
+ * "Correction" notes):
+ *   - one_confirmed: at most one row per escrow may ever reach Confirmed.
+ *   - one_inflight:  at most one row per escrow may be Pending/Requested at
+ *     once — this is what actually closes the genuinely-concurrent release
+ *     race; the application's own check-then-insert cannot, by itself.
+ */
+export const payouts = sqliteTable("payouts", {
+  id:                       text("id").primaryKey(),
+  escrowId:                 text("escrow_id").notNull(), // deliberately NOT unique — see above
+  transporterId:            text("transporter_id").notNull(),
+  amount:                   real("amount").notNull(),
+  phoneNumber:              text("phone_number").notNull(),
+  status:                   text("status").notNull(), // Pending|Requested|Confirmed|Failed
+  conversationId:           text("conversation_id"),
+  originatorConversationId: text("originator_conversation_id"),
+  transactionId:            text("transaction_id"),
+  resultCode:               integer("result_code"),
+  resultDesc:               text("result_desc"),
+  createdAt:                text("created_at").notNull(),
+  updatedAt:                text("updated_at").notNull(),
+}, (table) => ({
+  conversationIdUnique: uniqueIndex("payouts_conversation_id_unique").on(table.conversationId),
+  transactionIdUnique:  uniqueIndex("payouts_transaction_id_unique").on(table.transactionId),
+  oneConfirmedPerEscrow: uniqueIndex("payouts_one_confirmed_per_escrow")
+    .on(table.escrowId)
+    .where(sql`${table.status} = 'Confirmed'`),
+  oneInflightPerEscrow: uniqueIndex("payouts_one_inflight_per_escrow")
+    .on(table.escrowId)
+    .where(sql`${table.status} in ('Pending', 'Requested')`),
+}));
+
+/** Append-only audit trail — never updated, never deleted. */
+export const paymentEvents = sqliteTable("payment_events", {
+  id:         text("id").primaryKey(),
+  entityType: text("entity_type").notNull(), // "payment" | "escrow" | "payout"
+  entityId:   text("entity_id").notNull(),
+  eventType:  text("event_type").notNull(),
+  fromStatus: text("from_status"),
+  toStatus:   text("to_status"),
+  payload:    text("payload"), // JSON, verbatim
+  createdAt:  text("created_at").notNull(),
+});
+
+/** Anything that doesn't cleanly match the ledger lands here instead of being silently accepted or dropped. */
+export const reconciliationFlags = sqliteTable("reconciliation_flags", {
+  id:                 text("id").primaryKey(),
+  type:               text("type").notNull(),
+  relatedEntityType:  text("related_entity_type"),
+  relatedEntityId:    text("related_entity_id"),
+  rawPayload:         text("raw_payload"),
+  status:             text("status").notNull(), // "open" | "resolved"
+  createdAt:          text("created_at").notNull(),
+  resolvedAt:         text("resolved_at"),
 });

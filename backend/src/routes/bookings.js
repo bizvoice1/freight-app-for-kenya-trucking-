@@ -13,10 +13,13 @@
 import { Router } from "express";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { bookings, loads, trucks, drivers, trips } from "../db/schema.js";
+import { bookings, loads, trucks, drivers, trips, payments } from "../db/schema.js";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { BOOKING_STATUS } from "../domain/booking.js";
 import { createTrip as buildTrip, ACTIVE_TRIP_STATUSES } from "../../../src/models/trip.js";
+import { createPayment, NON_TERMINAL_PAYMENT_STATUSES } from "../domain/payment.js";
+import { logPaymentEvent } from "../services/ledger.js";
+import { stkPush, callbackUrl } from "../services/daraja.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -163,6 +166,62 @@ router.post("/:bookingId/create-trip", requireRole("fleet_owner"), async (req, r
   await db.update(bookings).set({ tripId: trip.id, status: BOOKING_STATUS.TRIP_CREATED, updatedAt: now }).where(eq(bookings.id, booking.id));
 
   res.status(201).json(trip);
+});
+
+/**
+ * POST /api/bookings/:bookingId/payment
+ * body: { phoneNumber }
+ *
+ * Phase 4K-B (docs/4K-DARAJA-SPEC.md Section 3). amount is NEVER read from
+ * the request body — it is the booking's load price, computed here,
+ * server-side, before Daraja is ever called (non-negotiable #2). Rejecting
+ * a second attempt while a non-terminal one exists is idempotency layer #1
+ * of Section 2.5's five ("STK request duplicated").
+ */
+router.post("/:bookingId/payment", requireRole("shipper"), async (req, res) => {
+  const booking = await getBookingOr404(req, res);
+  if (!booking) return;
+
+  const [load] = await db.select().from(loads).where(eq(loads.id, booking.loadId));
+  if (!load) return res.status(404).json({ error: `No load found with id ${booking.loadId}.` });
+  if (load.shipperId !== req.user.id) {
+    return res.status(403).json({ error: "This booking is not for a load belonging to the authenticated shipper." });
+  }
+  if (typeof load.price !== "number") {
+    return res.status(400).json({ error: `Load ${load.id} has no price set — cannot initiate payment.` });
+  }
+
+  const { phoneNumber, testOutcome, testForceReceipt, testDelayMs } = req.body || {};
+  if (!phoneNumber) return res.status(400).json({ error: "phoneNumber is required." });
+
+  const existingForBooking = await db.select().from(payments).where(eq(payments.bookingId, booking.id));
+  if (existingForBooking.some(p => NON_TERMINAL_PAYMENT_STATUSES.has(p.status))) {
+    return res.status(409).json({ error: `A payment is already in progress for booking ${booking.id}.` });
+  }
+
+  const count = (await db.select().from(payments)).length;
+  const payment = createPayment({ bookingId: booking.id, shipperId: req.user.id, amount: load.price, phoneNumber }, count);
+  await db.insert(payments).values(payment);
+
+  const daraja = await stkPush({
+    amount: payment.amount,
+    phoneNumber: payment.phoneNumber,
+    callbackUrl: callbackUrl("/api/payments/callback/stk"),
+    accountReference: booking.id,
+    testOutcome, testForceReceipt, testDelayMs,
+  });
+
+  const now = new Date().toISOString();
+  await db.update(payments).set({
+    merchantRequestId: daraja.merchantRequestId,
+    checkoutRequestId: daraja.checkoutRequestId,
+    status: "StkSent",
+    updatedAt: now,
+  }).where(eq(payments.id, payment.id));
+  await logPaymentEvent("payment", payment.id, "stk_push_sent", "Pending", "StkSent", { daraja });
+
+  const [updated] = await db.select().from(payments).where(eq(payments.id, payment.id));
+  res.status(201).json(updated);
 });
 
 export default router;
