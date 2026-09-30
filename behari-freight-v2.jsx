@@ -2374,14 +2374,23 @@ function MyTruck({ allLoads = [], truckAvailabilities = [], onDeclareAvailabilit
         </div>
       )}
 
-      {(showForm || myAvailabilities.length === 0) && (
+      {showForm ? (
         <div style={{ ...card,padding:16,marginBottom:16 }}>
-          <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",marginBottom:4 }}>Declare Truck Availability</div>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4 }}>
+            <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase" }}>Declare Truck Availability</div>
+            <button onClick={()=>setShowForm(false)} style={{ background:"none",border:"none",color:C.muted,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,padding:"2px 4px" }}>
+              ▲ Minimize
+            </button>
+          </div>
           <div style={{ fontSize:13,color:C.secondary,marginBottom:14,lineHeight:1.6 }}>
             Tell Behari where your truck will be free, when, and which way you're heading. We'll find cargo moving that direction — including return loads so you don't drive back empty.
           </div>
           <TruckAvailabilityForm fleet={CARRIER_FLEET} onSubmit={handleDeclare} submitting={declaring} />
         </div>
+      ) : (
+        <button onClick={()=>setShowForm(true)} style={{ width:"100%",background:C.bg,color:C.black,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,marginBottom:16 }}>
+          + Declare Truck Availability
+        </button>
       )}
 
       {viewingId && (
