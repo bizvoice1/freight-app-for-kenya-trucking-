@@ -15,6 +15,13 @@
       "when": 1790792065726,
       "tag": "0001_wonderful_invisible_woman",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790793939778,
+      "tag": "0002_woozy_reptil",
+      "breakpoints": true
     }
   ]
 }

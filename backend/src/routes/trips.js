@@ -41,6 +41,8 @@ import { TRUCK_STATUS } from "../../../src/models/truck.js";
 import { DRIVER_STATUS } from "../../../src/models/driver.js";
 import { ESCROW_STATUS, evaluateReleaseEligibility } from "../domain/escrow.js";
 import { logPaymentEvent } from "../services/ledger.js";
+import { NOTIFICATION_TYPE } from "../domain/notification.js";
+import { notifyUser, notifyUsers, allAdminUserIds } from "../services/notifications.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -213,6 +215,25 @@ async function maybeMakeEscrowEligibleForRelease(trip) {
   const now = new Date().toISOString();
   await db.update(escrows).set({ status: ESCROW_STATUS.RELEASE_PENDING, releasePendingAt: now, updatedAt: now }).where(eq(escrows.id, escrow.id));
   await logPaymentEvent("escrow", escrow.id, "status_changed", ESCROW_STATUS.HELD, ESCROW_STATUS.RELEASE_PENDING, { tripId: trip.id });
+
+  await notifyUser(booking.transporterId, NOTIFICATION_TYPE.RELEASE_PENDING,
+    "Delivery confirmed — payout pending", `Escrow ${escrow.id} for booking ${booking.id} is ready for release.`,
+    "escrow", escrow.id);
+  const adminIds = await allAdminUserIds();
+  await notifyUsers(adminIds, NOTIFICATION_TYPE.RELEASE_PENDING,
+    "Escrow ready for release", `Escrow ${escrow.id} (booking ${booking.id}) is awaiting admin release.`,
+    "escrow", escrow.id);
+}
+
+/** Phase 4L — notifies the load's shipper and the booking's transporter of every trip status change. */
+async function notifyTripStatusChanged(trip, nextStatus) {
+  const [load] = trip.loadId ? await db.select().from(loads).where(eq(loads.id, trip.loadId)) : [null];
+  const [booking] = trip.bookingId ? await db.select().from(bookings).where(eq(bookings.id, trip.bookingId)) : [null];
+  const recipients = [load?.shipperId, booking?.transporterId].filter(Boolean);
+  if (!recipients.length) return;
+  await notifyUsers(recipients, NOTIFICATION_TYPE.TRIP_STATUS,
+    `Trip ${trip.id}: ${nextStatus}`, `Trip ${trip.id} is now ${nextStatus}.`,
+    "trip", trip.id);
 }
 
 /**
@@ -246,6 +267,7 @@ router.post("/:tripId/status", async (req, res) => {
   await db.update(trips).set(updates).where(eq(trips.id, trip.id));
   if (TERMINAL_TRIP_STATUSES.has(nextStatus)) await releaseFleetAssignment(trip.truckId);
   if (nextStatus === TRIP_STATUS.DELIVERED) await maybeMakeEscrowEligibleForRelease({ ...trip, ...updates });
+  await notifyTripStatusChanged(trip, nextStatus);
 
   const [updated] = await db.select().from(trips).where(eq(trips.id, trip.id));
   res.json(updated);

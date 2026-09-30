@@ -261,3 +261,21 @@ export const reconciliationFlags = sqliteTable("reconciliation_flags", {
   createdAt:          text("created_at").notNull(),
   resolvedAt:         text("resolved_at"),
 });
+
+/**
+ * Phase 4L — in-app only (no SMS/email/push provider yet, deliberately: see
+ * domain/notification.js's header). One row per recipient per event — a
+ * "new load" notification going to five transporters is five rows, not one
+ * row with five recipients, so each transporter's read state is independent.
+ */
+export const notifications = sqliteTable("notifications", {
+  id:                text("id").primaryKey(),
+  userId:            text("user_id").notNull(), // users.id — the recipient
+  type:              text("type").notNull(),    // see domain/notification.js's NOTIFICATION_TYPE
+  title:             text("title").notNull(),
+  body:              text("body").notNull(),
+  relatedEntityType: text("related_entity_type"), // "load" | "booking" | "payment" | "escrow" | "payout" | "trip"
+  relatedEntityId:   text("related_entity_id"),
+  read:              integer("read", { mode: "boolean" }).notNull().default(false),
+  createdAt:         text("created_at").notNull(),
+});

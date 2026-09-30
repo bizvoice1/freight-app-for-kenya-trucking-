@@ -9,6 +9,7 @@ import paymentRoutes from "./routes/payments.js";
 import escrowRoutes from "./routes/escrows.js";
 import payoutRoutes from "./routes/payouts.js";
 import darajaWebhookRoutes from "./routes/darajaWebhooks.js";
+import notificationRoutes from "./routes/notifications.js";
 
 export const app = express();
 
@@ -35,6 +36,7 @@ app.use("/api", fleetRoutes); // GET /api/trucks, GET /api/drivers
 app.use("/api/payments", paymentRoutes);
 app.use("/api/escrows", escrowRoutes);
 app.use("/api/payouts", payoutRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {

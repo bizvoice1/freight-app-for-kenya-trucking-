@@ -20,11 +20,13 @@
 import { Router } from "express";
 import { eq, and, ne } from "drizzle-orm";
 import { db, isUniqueConstraintError } from "../db/client.js";
-import { payments, escrows, payouts } from "../db/schema.js";
+import { payments, escrows, payouts, bookings } from "../db/schema.js";
 import { PAYMENT_STATUS } from "../domain/payment.js";
 import { PAYOUT_STATUS } from "../domain/payout.js";
 import { ESCROW_STATUS, createEscrow } from "../domain/escrow.js";
 import { logPaymentEvent, flagReconciliation } from "../services/ledger.js";
+import { NOTIFICATION_TYPE } from "../domain/notification.js";
+import { notifyUser, notifyUsers, allAdminUserIds } from "../services/notifications.js";
 
 const router = Router();
 const ACK = { ResultCode: 0, ResultDesc: "Accepted" };
@@ -98,11 +100,26 @@ router.post("/payments/callback/stk", async (req, res) => {
 
     await logPaymentEvent("payment", payment.id, "callback_received", PAYMENT_STATUS.STK_SENT, PAYMENT_STATUS.PAID, req.body);
     await logPaymentEvent("escrow", escrow.id, "status_changed", null, ESCROW_STATUS.HELD, { paymentId: payment.id });
+
+    await notifyUser(payment.shipperId, NOTIFICATION_TYPE.PAYMENT_CONFIRMED,
+      "Payment confirmed", `Your payment of ${payment.amount} for booking ${payment.bookingId} was received.`,
+      "payment", payment.id);
+    const [booking] = await db.select().from(bookings).where(eq(bookings.id, payment.bookingId));
+    if (booking) {
+      await notifyUser(booking.transporterId, NOTIFICATION_TYPE.ESCROW_HELD,
+        "Escrow funded", `Payment for booking ${booking.id} is confirmed and held in escrow.`,
+        "escrow", escrow.id);
+    }
   } else {
     const failStatus = cb.ResultCode === 1032 ? PAYMENT_STATUS.CANCELLED : PAYMENT_STATUS.FAILED;
     await db.update(payments).set({ status: failStatus, resultCode: cb.ResultCode, resultDesc: cb.ResultDesc, updatedAt: now })
       .where(eq(payments.id, payment.id));
     await logPaymentEvent("payment", payment.id, "callback_received", PAYMENT_STATUS.STK_SENT, failStatus, req.body);
+
+    await notifyUser(payment.shipperId, NOTIFICATION_TYPE.PAYMENT_FAILED,
+      failStatus === PAYMENT_STATUS.CANCELLED ? "Payment cancelled" : "Payment failed",
+      `Your payment for booking ${payment.bookingId} was not completed (${cb.ResultDesc}).`,
+      "payment", payment.id);
   }
 
   res.status(200).json(ACK);
@@ -163,6 +180,10 @@ router.post("/payouts/callback/b2c", async (req, res) => {
       await logPaymentEvent("escrow", escrow.id, "status_changed", ESCROW_STATUS.RELEASE_IN_PROGRESS, ESCROW_STATUS.SETTLED);
     }
     await logPaymentEvent("payout", payout.id, "callback_received", PAYOUT_STATUS.REQUESTED, PAYOUT_STATUS.CONFIRMED, req.body);
+
+    await notifyUser(payout.transporterId, NOTIFICATION_TYPE.PAYOUT_CONFIRMED,
+      "Payout confirmed", `Your payout of ${payout.amount} for escrow ${payout.escrowId} has been paid.`,
+      "payout", payout.id);
   } else {
     await db.update(payouts).set({ status: PAYOUT_STATUS.FAILED, resultCode: result.ResultCode, resultDesc: result.ResultDesc, updatedAt: now })
       .where(eq(payouts.id, payout.id));
@@ -174,6 +195,14 @@ router.post("/payouts/callback/b2c", async (req, res) => {
       await logPaymentEvent("escrow", escrow.id, "status_changed", ESCROW_STATUS.RELEASE_IN_PROGRESS, ESCROW_STATUS.RELEASE_PENDING);
     }
     await logPaymentEvent("payout", payout.id, "callback_received", PAYOUT_STATUS.REQUESTED, PAYOUT_STATUS.FAILED, req.body);
+
+    await notifyUser(payout.transporterId, NOTIFICATION_TYPE.PAYOUT_FAILED,
+      "Payout failed", `Your payout for escrow ${payout.escrowId} failed (${result.ResultDesc}) and will need to be retried.`,
+      "payout", payout.id);
+    const adminIds = await allAdminUserIds();
+    await notifyUsers(adminIds, NOTIFICATION_TYPE.PAYOUT_FAILED,
+      "Payout failed — retry needed", `Payout ${payout.id} for escrow ${payout.escrowId} failed (${result.ResultDesc}).`,
+      "payout", payout.id);
   }
 
   res.status(200).json(ACK);

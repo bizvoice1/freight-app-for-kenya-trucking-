@@ -12,6 +12,8 @@ import { loads, bookings } from "../db/schema.js";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { createLoad, LOAD_STATUS } from "../domain/load.js";
 import { createBooking } from "../domain/booking.js";
+import { NOTIFICATION_TYPE } from "../domain/notification.js";
+import { notifyUsers, allTransporterUserIds } from "../services/notifications.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -26,6 +28,18 @@ router.post("/", requireRole("shipper"), async (req, res) => {
   const count = (await db.select().from(loads)).length;
   const load = createLoad({ shipperId: req.user.id, cargo, origin, destination, weight, truckType, price, pickupDate }, count);
   await db.insert(loads).values(load);
+
+  // Phase 4L — marketplace-wide, not targeted: there's no backend matching
+  // engine yet to decide which transporter this load is actually relevant
+  // to (see the frontend-only matching plan, unbuilt on this backend).
+  const transporterIds = await allTransporterUserIds();
+  await notifyUsers(
+    transporterIds, NOTIFICATION_TYPE.LOAD_POSTED,
+    "New load posted",
+    `${load.cargo}: ${load.origin} → ${load.destination}`,
+    "load", load.id
+  );
+
   res.status(201).json(load);
 });
 

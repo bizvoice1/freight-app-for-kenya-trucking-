@@ -1,11 +1,41 @@
-# Behari Freight — Backend (Phases 4F–4K)
+# Behari Freight — Backend (Phases 4F–4L)
 
 Real backend: auth, GPS tracking (4F), shared live-tracking reads (4G), the
 real Load → Booking → Trip chain (4H), authorization hardening (4I), a
-server-authoritative trip lifecycle (4J), and now Daraja M-Pesa escrow (4K)
-— Behari controls the payment lifecycle, not just freight matching and
-tracking. All server-identity-checked, all in one SQLite (dev)/
-Postgres-ready database.
+server-authoritative trip lifecycle (4J), Daraja M-Pesa escrow (4K), and
+narrow in-app notifications (4L) — Behari controls the payment lifecycle,
+not just freight matching and tracking, and every party now has a record of
+what happened to their money and their trip. All server-identity-checked,
+all in one SQLite (dev)/Postgres-ready database.
+
+## Notifications (Phase 4L)
+
+In-app only, deliberately: one new `notifications` table
+(`domain/notification.js`, `services/notifications.js`,
+`routes/notifications.js`), no SMS/email/push provider, no new external
+dependency or credential — the same low-risk pattern as everything else in
+this backend, and the natural place to add a real channel later without
+touching the event → recipient decisions below.
+
+| Event | Recipient(s) |
+|---|---|
+| Shipper posts a load | Every `fleet_owner` (marketplace-wide — there's no backend matching engine yet to target it more precisely) |
+| Payment confirmed | The shipper |
+| Payment failed / cancelled | The shipper |
+| Escrow held (payment confirmed) | The transporter |
+| Escrow reaches ReleasePending (Delivered) | The transporter + every admin (admin must act) |
+| Payout confirmed | The transporter |
+| Payout failed | The transporter + every admin (a retry needs admin action) |
+| Any trip status change | The load's shipper + the booking's transporter |
+
+`GET /api/notifications?unreadOnly=true`, `GET /api/notifications/unread-count`,
+`POST /api/notifications/:id/read`, `POST /api/notifications/read-all` — all
+scoped unconditionally to `req.user.id`; a notification belongs to exactly
+the user it was written for, so there's no ownership chain to walk the way
+payments/escrows/payouts need. Verified: `npm run test:4l` (9/9) — every
+event → recipient mapping above, the read/unread endpoints, and that one
+user can't mark another user's notification read (404, not 403 — it isn't
+visible to them at all).
 
 ## Daraja M-Pesa + escrow (Phase 4K)
 
@@ -153,12 +183,13 @@ tracking (post/latest/history, start/stop), trip lookup (single + filtered
 list), **loads** (post, list, get), **bookings** (accept → assign
 truck+driver → create trip), truck/driver listing.
 
-**Not yet built:** notifications, WebSockets/realtime (polling only, by
+**Not yet built:** a real notification delivery channel (4L is in-app/poll
+only — no SMS/email/push provider), WebSockets/realtime (polling only, by
 design — see the frontend's `useLiveTrip.js`), production OTP, AI matching,
-analytics, cosmetic redesign, and a frontend "Pay now" button (4K's payment
-endpoints exist and are verified; nothing in the UI calls them yet — see
-Phase 4K's own section above). Fleet *assignment* (which driver currently
-mans which truck) also
+analytics, cosmetic redesign, and a frontend "Pay now" button or
+notifications bell (4K/4L's endpoints exist and are verified; nothing in the
+UI calls either yet — see their own sections above). Fleet *assignment*
+(which driver currently mans which truck) also
 stays a frontend/`fleetService.js` concern — the backend only reads its own
 seeded snapshot of that when validating a booking's truck+driver pick.
 
@@ -263,6 +294,11 @@ POST /api/escrows/:escrowId/mark-payout-reversed     (admin only) -- see Phase 4
 GET  /api/payouts/:id
 GET  /api/payouts?escrowId=
 POST /api/payouts/callback/b2c                (Safaricom/simulator -> us; NOT behind auth)
+
+GET  /api/notifications?unreadOnly=      -- Phase 4L, own notifications only
+GET  /api/notifications/unread-count
+POST /api/notifications/:id/read
+POST /api/notifications/read-all
 ```
 
 ## Load → Booking → Trip: the defining test

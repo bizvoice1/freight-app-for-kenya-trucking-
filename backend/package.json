@@ -11,6 +11,7 @@
     "db:migrate": "node src/db/migrate.js",
     "db:seed": "node src/db/seed.js",
     "test:4k": "node scripts/acceptance-4k.mjs",
+    "test:4l": "node scripts/acceptance-4l.mjs",
     "test:regression": "node scripts/regression-4a-4j.mjs"
   },
   "dependencies": {
