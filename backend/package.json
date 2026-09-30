@@ -1,0 +1,26 @@
+{
+  "name": "behari-freight-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 4F — Behari Freight tracking backend. SQLite for development, Postgres-ready via Drizzle ORM (see src/db/client.js).",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node src/db/migrate.js",
+    "db:seed": "node src/db/seed.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.33.0",
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.24.2"
+  }
+}

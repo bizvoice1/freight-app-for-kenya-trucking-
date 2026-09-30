@@ -5,4 +5,7 @@ dist/
 backend/node_modules/
 backend/*.sqlite
 backend/*.sqlite-journal
+backend/*.sqlite-wal
+backend/*.sqlite-shm
 .env
+backend/.env

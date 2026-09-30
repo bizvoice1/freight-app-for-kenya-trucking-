@@ -8,6 +8,12 @@
       "port": 5199
     },
     {
+      "name": "behari-backend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd backend && npm run dev"],
+      "port": 4000
+    },
+    {
       "name": "kimi-app",
       "runtimeExecutable": "bash",
       "runtimeArgs": ["-c", "exec '/Users/farheard/Downloads/kimi app/node_modules/.bin/vite' '/Users/farheard/Downloads/kimi app' --port 3001"],

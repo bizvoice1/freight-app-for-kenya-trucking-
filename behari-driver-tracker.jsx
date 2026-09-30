@@ -1,16 +1,27 @@
 import { useState, useEffect, useCallback } from "react";
-// Phase 4E — the Driver Tracking surface. Deliberately its own tiny app,
-// not a tab inside the Carrier portal: the person holding this phone is the
-// DRIVER, who may not be the fleet owner signed into the Carrier app at all
-// (see src/models/fleetOwner.js). One job only: start/stop sharing this
-// device's location for whichever trip is currently assigned to this driver.
-import { getDrivers, getTruckById } from "./src/services/fleetService.js";
+// Phase 4E introduced this screen; Phase 4F gave it a real backend.
+// Deliberately its own tiny app, not a tab inside the Carrier portal: the
+// person holding this phone is the DRIVER, who may not be the fleet owner
+// signed into the Carrier app at all (see src/models/fleetOwner.js). One
+// job only: start/stop sharing this device's location for whichever trip
+// is currently assigned to this driver.
+//
+// NOTE ON THE SEAM THIS PHASE LEAVES: trip/fleet LOOKUP below still reads
+// from the frontend's own localStorage-backed tripService/fleetService
+// (Phase 4B/4C) — there is no "list my trips" endpoint in 4F's backend, by
+// design (see backend/src/db/seed.js). Only the actual tracking — identity,
+// start/stop, and every location read/write — goes through the real
+// backend now. A trip only tracks end-to-end today if it exists in BOTH
+// stores, which is true for the seeded demo trip; migrating booking/trip
+// creation to the backend too is a later phase's job, same as this one
+// deferred escrow/M-Pesa/notifications.
+import { getTruckById } from "./src/services/fleetService.js";
 import { getTrips } from "./src/services/tripService.js";
 import { ACTIVE_TRIP_STATUSES } from "./src/models/trip.js";
 import {
-  setCurrentDriverId,
-  getCurrentDriverId,
-  clearCurrentDriverId,
+  loginDriver,
+  getCurrentDriverUser,
+  logoutDriver,
   startDriverTracking,
   stopDriverTracking,
   getTrackingState,
@@ -41,31 +52,46 @@ function secondsAgo(isoTimestamp) {
   return Math.max(0, Math.round((Date.now() - new Date(isoTimestamp).getTime()) / 1000));
 }
 
-/* ── Step 1: which driver is this device? (no real auth yet — see trackingService.js) ── */
-function DriverPicker({ onPick }) {
-  const [drivers, setDrivers] = useState([]);
+/* ── Step 1: real backend login — phone + PIN, verified server-side ── */
+function DriverLogin({ onLoggedIn }) {
+  const [phone, setPhone]   = useState("");
+  const [pin, setPin]       = useState("");
+  const [busy, setBusy]     = useState(false);
+  const [error, setError]   = useState("");
 
-  useEffect(() => { getDrivers().then(setDrivers); }, []);
+  async function handleLogin(e) {
+    e.preventDefault();
+    setBusy(true); setError("");
+    const result = await loginDriver(phone.trim(), pin.trim());
+    setBusy(false);
+    if (result.ok) onLoggedIn(result.user);
+    else setError(result.error || "Login failed.");
+  }
 
   return (
     <div style={{ minHeight:"100vh", background:C.bg, color:C.white, fontFamily:font, padding:"32px 20px" }}>
       <div style={{ fontSize:13, fontWeight:800, letterSpacing:1.5, color:C.green, marginBottom:6 }}>BEHARI DRIVER</div>
-      <div style={{ fontSize:20, fontWeight:700, marginBottom:24 }}>Who's driving?</div>
-      {drivers.length === 0 && <div style={{ color:C.muted, fontSize:14 }}>Loading drivers…</div>}
-      {drivers.map(d => (
+      <div style={{ fontSize:20, fontWeight:700, marginBottom:24 }}>Sign in to track a trip</div>
+
+      <form onSubmit={handleLogin}>
+        <label style={{ fontSize:11, color:C.muted, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase", display:"block", marginBottom:6 }}>Phone</label>
+        <input
+          value={phone} onChange={e => setPhone(e.target.value)} placeholder="0722100200" inputMode="tel"
+          style={{ width:"100%", boxSizing:"border-box", background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"14px 16px", color:C.white, fontFamily:font, fontSize:16, marginBottom:16 }}
+        />
+        <label style={{ fontSize:11, color:C.muted, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase", display:"block", marginBottom:6 }}>PIN</label>
+        <input
+          value={pin} onChange={e => setPin(e.target.value)} placeholder="••••" type="password" inputMode="numeric"
+          style={{ width:"100%", boxSizing:"border-box", background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"14px 16px", color:C.white, fontFamily:font, fontSize:16, marginBottom:20, letterSpacing:4 }}
+        />
+        {error && <div style={{ background:C.redBg, color:C.red, fontSize:13, borderRadius:8, padding:"10px 12px", marginBottom:16 }}>{error}</div>}
         <button
-          key={d.id}
-          onClick={() => onPick(d.id)}
-          style={{
-            display:"block", width:"100%", textAlign:"left", background:C.card,
-            border:`1px solid ${C.border}`, borderRadius:12, padding:"16px 18px",
-            marginBottom:10, color:C.white, fontFamily:font, cursor:"pointer",
-          }}
+          type="submit" disabled={busy}
+          style={{ width:"100%", background:C.green, color:"#00220F", border:"none", borderRadius:12, padding:"16px", fontSize:16, fontWeight:800, fontFamily:font, cursor: busy ? "default" : "pointer", opacity: busy ? 0.7 : 1 }}
         >
-          <div style={{ fontSize:16, fontWeight:700 }}>{d.name}</div>
-          <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>{d.phone || "—"} · {d.status}</div>
+          {busy ? "Signing in…" : "SIGN IN"}
         </button>
-      ))}
+      </form>
     </div>
   );
 }
@@ -249,28 +275,21 @@ function TrackerScreen({ tripId, driverName, onSwitchTrip }) {
 
 /* ── Root ─────────────────────────────────────────────────── */
 export default function BehariDriverTracker() {
-  const [driverId, setDriverId] = useState(() => getCurrentDriverId());
-  const [driverName, setDriverName] = useState("");
+  const [user, setUser] = useState(() => getCurrentDriverUser());
   const [tripId, setTripId] = useState(null);
 
-  useEffect(() => {
-    if (!driverId) return;
-    getDrivers().then(all => setDriverName(all.find(d => d.id === driverId)?.name || ""));
-  }, [driverId]);
-
-  function pickDriver(id) {
-    setCurrentDriverId(id);
-    setDriverId(id);
+  function handleLoggedIn(loggedInUser) {
+    setUser(loggedInUser);
     setTripId(null);
   }
 
   function switchDriver() {
-    clearCurrentDriverId();
-    setDriverId(null);
+    logoutDriver();
+    setUser(null);
     setTripId(null);
   }
 
-  if (!driverId) return <DriverPicker onPick={pickDriver} />;
-  if (!tripId)   return <TripPicker driverId={driverId} onPick={setTripId} onSwitchDriver={switchDriver} />;
-  return <TrackerScreen tripId={tripId} driverName={driverName} onSwitchTrip={() => setTripId(null)} />;
+  if (!user)   return <DriverLogin onLoggedIn={handleLoggedIn} />;
+  if (!tripId) return <TripPicker driverId={user.driverId} onPick={setTripId} onSwitchDriver={switchDriver} />;
+  return <TrackerScreen tripId={tripId} driverName={user.name} onSwitchTrip={() => setTripId(null)} />;
 }
