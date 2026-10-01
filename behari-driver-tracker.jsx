@@ -50,8 +50,26 @@ function secondsAgo(isoTimestamp) {
   return Math.max(0, Math.round((Date.now() - new Date(isoTimestamp).getTime()) / 1000));
 }
 
+/**
+ * This portal is deliberately its own self-contained app (see the file
+ * header) and was never wired to App.jsx's own logout/portal-switch sheet —
+ * which meant there was no way back to the main Behari site once you
+ * landed here, not even from the login screen. `onExit` is App.jsx's
+ * existing onLogout (resets the outer app's active portal, same mechanism
+ * every other portal already uses) — only rendered when it's actually
+ * passed in, so this component still works standalone if reused elsewhere.
+ */
+function ExitToMainSite({ onExit }) {
+  if (!onExit) return null;
+  return (
+    <button onClick={onExit} style={{ background:"none", border:"none", color:C.muted, fontFamily:font, fontSize:13, fontWeight:700, cursor:"pointer", padding:0, marginBottom:20, display:"flex", alignItems:"center", gap:6 }}>
+      ← Main site
+    </button>
+  );
+}
+
 /* ── Step 1: real backend login — phone + PIN, verified server-side ── */
-function DriverLogin({ onLoggedIn }) {
+function DriverLogin({ onLoggedIn, onExit }) {
   const [phone, setPhone]   = useState("");
   const [pin, setPin]       = useState("");
   const [busy, setBusy]     = useState(false);
@@ -68,6 +86,7 @@ function DriverLogin({ onLoggedIn }) {
 
   return (
     <div style={{ minHeight:"100vh", background:C.bg, color:C.white, fontFamily:font, padding:"32px 20px" }}>
+      <ExitToMainSite onExit={onExit} />
       <div style={{ fontSize:13, fontWeight:800, letterSpacing:1.5, color:C.green, marginBottom:6 }}>BEHARI DRIVER</div>
       <div style={{ fontSize:20, fontWeight:700, marginBottom:24 }}>Sign in to track a trip</div>
 
@@ -95,7 +114,7 @@ function DriverLogin({ onLoggedIn }) {
 }
 
 /* ── Step 2: pick the active trip assigned to this driver ── */
-function TripPicker({ driverId, onPick, onSwitchDriver }) {
+function TripPicker({ driverId, onPick, onSwitchDriver, onExit }) {
   const [trips, setTrips] = useState(null);
 
   useEffect(() => {
@@ -106,6 +125,7 @@ function TripPicker({ driverId, onPick, onSwitchDriver }) {
 
   return (
     <div style={{ minHeight:"100vh", background:C.bg, color:C.white, fontFamily:font, padding:"32px 20px" }}>
+      <ExitToMainSite onExit={onExit} />
       <div style={{ fontSize:13, fontWeight:800, letterSpacing:1.5, color:C.green, marginBottom:6 }}>BEHARI DRIVER</div>
       <div style={{ fontSize:20, fontWeight:700, marginBottom:24 }}>Your active trips</div>
 
@@ -139,7 +159,7 @@ function TripPicker({ driverId, onPick, onSwitchDriver }) {
 }
 
 /* ── Step 3: the tracker itself — Ready, then Tracking ── */
-function TrackerScreen({ tripId, driverName, onSwitchTrip }) {
+function TrackerScreen({ tripId, driverName, onSwitchTrip, onExit }) {
   const [trip, setTrip]   = useState(null);
   const [truck, setTruck] = useState(null);
   const [state, setState] = useState(getTrackingState(tripId));
@@ -186,6 +206,7 @@ function TrackerScreen({ tripId, driverName, onSwitchTrip }) {
 
   return (
     <div style={{ minHeight:"100vh", background:C.bg, color:C.white, fontFamily:font, padding:"28px 20px 40px", display:"flex", flexDirection:"column" }}>
+      <ExitToMainSite onExit={onExit} />
       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:28 }}>
         <div style={{ width:9, height:9, borderRadius:"50%", background: isTracking ? C.green : C.muted, boxShadow: isTracking ? `0 0 10px ${C.green}` : "none" }} />
         <div style={{ fontSize:13, fontWeight:800, letterSpacing:1.2 }}>
@@ -272,7 +293,7 @@ function TrackerScreen({ tripId, driverName, onSwitchTrip }) {
 }
 
 /* ── Root ─────────────────────────────────────────────────── */
-export default function BehariDriverTracker() {
+export default function BehariDriverTracker({ onLogout }) {
   const [user, setUser] = useState(() => getCurrentDriverUser());
   const [tripId, setTripId] = useState(null);
 
@@ -287,7 +308,7 @@ export default function BehariDriverTracker() {
     setTripId(null);
   }
 
-  if (!user)   return <DriverLogin onLoggedIn={handleLoggedIn} />;
-  if (!tripId) return <TripPicker driverId={user.driverId} onPick={setTripId} onSwitchDriver={switchDriver} />;
-  return <TrackerScreen tripId={tripId} driverName={user.name} onSwitchTrip={() => setTripId(null)} />;
+  if (!user)   return <DriverLogin onLoggedIn={handleLoggedIn} onExit={onLogout} />;
+  if (!tripId) return <TripPicker driverId={user.driverId} onPick={setTripId} onSwitchDriver={switchDriver} onExit={onLogout} />;
+  return <TrackerScreen tripId={tripId} driverName={user.name} onSwitchTrip={() => setTripId(null)} onExit={onLogout} />;
 }

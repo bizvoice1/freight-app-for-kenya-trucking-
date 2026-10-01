@@ -63,8 +63,27 @@ function StatusPill({ status }) {
   return <span style={{ fontSize: 11, fontWeight:800, color, border:`1px solid ${color}`, borderRadius:100, padding:"2px 10px" }}>{status}</span>;
 }
 
+/**
+ * This portal is deliberately its own standalone surface (see the file
+ * header) and was never wired to App.jsx's own logout/portal-switch sheet —
+ * which meant there was no way back to the main Behari site once you
+ * landed here, not even from the login screen. `onExitMainSite` is App.jsx's
+ * existing onLogout (resets the outer app's active portal, same mechanism
+ * every other portal already uses) — kept distinct from this file's own
+ * `onLogout` (which only clears the marketplace's backend session and
+ * returns to MarketplaceLogin, still inside this portal).
+ */
+function ExitToMainSite({ onExit }) {
+  if (!onExit) return null;
+  return (
+    <button onClick={onExit} style={{ background:"none", border:"none", color:C.muted, fontFamily:font, fontSize:13, fontWeight:700, cursor:"pointer", padding:0, marginBottom:20, display:"flex", alignItems:"center", gap:6 }}>
+      ← Main site
+    </button>
+  );
+}
+
 /* ── Login ── */
-function MarketplaceLogin({ onLoggedIn }) {
+function MarketplaceLogin({ onLoggedIn, onExitMainSite }) {
   const [role, setRole] = useState("shipper");
   const [phone, setPhone] = useState("");
   const [pin, setPin] = useState("");
@@ -82,6 +101,7 @@ function MarketplaceLogin({ onLoggedIn }) {
 
   return (
     <div style={{ minHeight:"100vh", background:C.bg, color:C.white, fontFamily:font, padding:"32px 20px" }}>
+      <ExitToMainSite onExit={onExitMainSite} />
       <div style={{ fontSize:13, fontWeight:800, letterSpacing:1.5, color:C.green, marginBottom:6 }}>BEHARI MARKETPLACE</div>
       <div style={{ fontSize:20, fontWeight:700, marginBottom:24 }}>Sign in</div>
 
@@ -107,7 +127,7 @@ function MarketplaceLogin({ onLoggedIn }) {
 }
 
 /* ── Shipper view ── */
-function ShipperView({ user, onLogout }) {
+function ShipperView({ user, onLogout, onExitMainSite }) {
   const [form, setForm] = useState({ cargo:"", origin:"", destination:"", weight:"", truckType:"", price:"", pickupDate:"" });
   const [myLoads, setMyLoads] = useState([]);
   const [posting, setPosting] = useState(false);
@@ -129,6 +149,7 @@ function ShipperView({ user, onLogout }) {
 
   return (
     <div style={{ minHeight:"100vh", background:C.bg, color:C.white, fontFamily:font, padding:"28px 20px 60px" }}>
+      <ExitToMainSite onExit={onExitMainSite} />
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24 }}>
         <div>
           <div style={{ fontSize:13, fontWeight:800, letterSpacing:1.5, color:C.green }}>BEHARI MARKETPLACE</div>
@@ -185,7 +206,7 @@ function ShipperView({ user, onLogout }) {
 }
 
 /* ── Transporter view ── */
-function TransporterView({ user, onLogout }) {
+function TransporterView({ user, onLogout, onExitMainSite }) {
   const [tab, setTab] = useState("marketplace");
   const [openLoads, setOpenLoads] = useState([]);
   const [bookings, setBookings] = useState([]);
@@ -231,6 +252,7 @@ function TransporterView({ user, onLogout }) {
 
   return (
     <div style={{ minHeight:"100vh", background:C.bg, color:C.white, fontFamily:font, padding:"28px 20px 60px" }}>
+      <ExitToMainSite onExit={onExitMainSite} />
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
         <div>
           <div style={{ fontSize:13, fontWeight:800, letterSpacing:1.5, color:C.green }}>BEHARI MARKETPLACE</div>
@@ -310,12 +332,12 @@ function TransporterView({ user, onLogout }) {
 }
 
 /* ── Root ─────────────────────────────────────────────────── */
-export default function BehariMarketplace() {
+export default function BehariMarketplace({ onLogout: onExitMainSite }) {
   const [user, setUser] = useState(() => market.getCurrentUser());
 
   function handleLogout() { market.logout(); setUser(null); }
 
-  if (!user) return <MarketplaceLogin onLoggedIn={setUser} />;
-  if (user.role === "shipper") return <ShipperView user={user} onLogout={handleLogout} />;
-  return <TransporterView user={user} onLogout={handleLogout} />;
+  if (!user) return <MarketplaceLogin onLoggedIn={setUser} onExitMainSite={onExitMainSite} />;
+  if (user.role === "shipper") return <ShipperView user={user} onLogout={handleLogout} onExitMainSite={onExitMainSite} />;
+  return <TransporterView user={user} onLogout={handleLogout} onExitMainSite={onExitMainSite} />;
 }
