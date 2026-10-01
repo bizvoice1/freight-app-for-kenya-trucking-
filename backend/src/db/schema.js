@@ -25,7 +25,7 @@
  *     identically once the column type becomes Postgres `timestamptz`.
  */
 
-import { sqliteTable, text, real, integer, unique, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, real, integer, unique, uniqueIndex, index } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const fleetOwners = sqliteTable("fleet_owners", {
@@ -70,7 +70,17 @@ export const trips = sqliteTable("trips", {
   latestLocationId: text("latest_location_id"),
   createdAt:        text("created_at").notNull(),
   updatedAt:        text("updated_at").notNull(),
-});
+}, (table) => ({
+  loadIdIdx:   index("trips_load_id_idx").on(table.loadId),
+  truckIdIdx:  index("trips_truck_id_idx").on(table.truckId),
+  driverIdIdx: index("trips_driver_id_idx").on(table.driverId),
+  // Phase 4M — same reasoning as bookings.loadId above: two concurrent
+  // create-trip calls for the same booking could otherwise both insert a
+  // trip. bookingId is nullable (a trip predating Phase 4H's booking flow),
+  // and SQLite's unique index treats multiple NULLs as non-conflicting, so
+  // this only constrains rows that actually have one.
+  bookingIdUnique: uniqueIndex("trips_booking_id_unique").on(table.bookingId),
+}));
 
 export const locationUpdates = sqliteTable("location_updates", {
   id:        text("id").primaryKey(),
@@ -130,7 +140,15 @@ export const bookings = sqliteTable("bookings", {
   status:        text("status").notNull(), // "Accepted" | "Assigned" | "Trip Created" | "Cancelled"
   createdAt:     text("created_at").notNull(),
   updatedAt:     text("updated_at").notNull(),
-});
+}, (table) => ({
+  transporterIdIdx: index("bookings_transporter_id_idx").on(table.transporterId),
+  // Phase 4M — a real gap the attack suite surfaced: two transporters
+  // accepting the same load at the same instant could otherwise both
+  // insert a booking (the `load.status !== OPEN` check alone is the same
+  // check-then-act race as 4K's release endpoint). This is the real guard;
+  // routes/loads.js's POST /:loadId/accept catches the violation.
+  loadIdUnique: uniqueIndex("bookings_load_id_unique").on(table.loadId),
+}));
 
 /**
  * Phase 4H — deliberately NOT the frontend's rich models/load.js LOAD_STATUS
@@ -153,7 +171,9 @@ export const loads = sqliteTable("loads", {
   status:      text("status").notNull(), // "Open" | "Booked" | "Cancelled"
   createdAt:   text("created_at").notNull(),
   updatedAt:   text("updated_at").notNull(),
-});
+}, (table) => ({
+  shipperIdIdx: index("loads_shipper_id_idx").on(table.shipperId),
+}));
 
 /**
  * Phase 4K — Daraja M-Pesa + escrow. Five new tables, per
@@ -185,6 +205,14 @@ export const payments = sqliteTable("payments", {
 }, (table) => ({
   checkoutRequestIdUnique:  uniqueIndex("payments_checkout_request_id_unique").on(table.checkoutRequestId),
   mpesaReceiptNumberUnique: uniqueIndex("payments_mpesa_receipt_number_unique").on(table.mpesaReceiptNumber),
+  // Phase 4M — same check-then-act race as bookings/trips above: two rapid
+  // POST /bookings/:id/payment calls could otherwise both insert a
+  // Pending row before either's non-terminal check sees the other. At most
+  // one Pending/StkSent payment per booking at a time; bookings.js catches
+  // the violation and returns 409.
+  oneInflightPerBooking: uniqueIndex("payments_one_inflight_per_booking")
+    .on(table.bookingId)
+    .where(sql`${table.status} in ('Pending', 'StkSent')`),
 }));
 
 export const escrows = sqliteTable("escrows", {
@@ -247,6 +275,7 @@ export const paymentEvents = sqliteTable("payment_events", {
   fromStatus: text("from_status"),
   toStatus:   text("to_status"),
   payload:    text("payload"), // JSON, verbatim
+  requestId:  text("request_id"), // Phase 4M — the app.js-assigned req.id that triggered this event, nullable (not every event has an inbound HTTP request behind it)
   createdAt:  text("created_at").notNull(),
 });
 
@@ -278,4 +307,6 @@ export const notifications = sqliteTable("notifications", {
   relatedEntityId:   text("related_entity_id"),
   read:              integer("read", { mode: "boolean" }).notNull().default(false),
   createdAt:         text("created_at").notNull(),
-});
+}, (table) => ({
+  userIdIdx: index("notifications_user_id_idx").on(table.userId),
+}));

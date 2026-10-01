@@ -14,6 +14,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { trucks, drivers } from "../db/schema.js";
 import { requireAuth } from "../auth/middleware.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -26,7 +27,7 @@ router.use(requireAuth);
  * regardless of what they pass; a mismatched explicit request is rejected
  * outright so it's visibly a permissions error, not silently ignored.
  */
-router.get("/trucks", async (req, res) => {
+router.get("/trucks", asyncHandler(async (req, res) => {
   const { ownerId } = req.query;
 
   if (req.user.role === "fleet_owner") {
@@ -41,11 +42,11 @@ router.get("/trucks", async (req, res) => {
     ? await db.select().from(trucks).where(eq(trucks.ownerId, ownerId))
     : await db.select().from(trucks);
   res.json(rows);
-});
+}));
 
 /** GET /api/drivers */
-router.get("/drivers", async (_req, res) => {
+router.get("/drivers", asyncHandler(async (_req, res) => {
   res.json(await db.select().from(drivers));
-});
+}));
 
 export default router;

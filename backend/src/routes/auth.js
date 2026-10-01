@@ -4,6 +4,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { users } from "../db/schema.js";
 import { signToken } from "../auth/jwt.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
 const router = Router();
 
@@ -16,7 +17,7 @@ const router = Router();
  * schema.js's users table note. Returns a signed token; the phone never
  * appears in the token itself, only the resolved user id/role/driverId.
  */
-router.post("/login", async (req, res) => {
+router.post("/login", asyncHandler(async (req, res) => {
   const { phone, pin, role } = req.body || {};
   if (!phone || !pin || !role) {
     return res.status(400).json({ error: "phone, pin and role are all required." });
@@ -37,6 +38,6 @@ router.post("/login", async (req, res) => {
     token,
     user: { id: user.id, name: user.name, role: user.role, driverId: user.driverId, fleetOwnerId: user.fleetOwnerId },
   });
-});
+}));
 
 export default router;

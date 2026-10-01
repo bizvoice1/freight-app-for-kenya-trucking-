@@ -21,6 +21,7 @@ import { ESCROW_STATUS } from "../domain/escrow.js";
 import { createPayout, NON_TERMINAL_PAYOUT_STATUSES, PAYOUT_STATUS } from "../domain/payout.js";
 import { logPaymentEvent } from "../services/ledger.js";
 import { b2cPayment, callbackUrl } from "../services/daraja.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -47,16 +48,16 @@ async function canViewEscrow(req, escrow) {
   return false;
 }
 
-router.get("/:escrowId", async (req, res) => {
+router.get("/:escrowId", asyncHandler(async (req, res) => {
   const escrow = await getEscrowOr404(req, res);
   if (!escrow) return;
   if (!(await canViewEscrow(req, escrow))) {
     return res.status(403).json({ error: "You are not authorized to view this escrow." });
   }
   res.json(escrow);
-});
+}));
 
-router.get("/", async (req, res) => {
+router.get("/", asyncHandler(async (req, res) => {
   const { bookingId } = req.query;
   let rows = bookingId
     ? await db.select().from(escrows).where(eq(escrows.bookingId, bookingId))
@@ -76,7 +77,7 @@ router.get("/", async (req, res) => {
     rows = [];
   }
   res.json(rows);
-});
+}));
 
 /**
  * POST /api/escrows/:escrowId/release (admin)
@@ -94,7 +95,7 @@ router.get("/", async (req, res) => {
  * transactions run synchronously and would just serialize the two requests,
  * hiding the very race this route needs to survive.
  */
-router.post("/:escrowId/release", requireRole("admin"), async (req, res) => {
+router.post("/:escrowId/release", requireRole("admin"), asyncHandler(async (req, res) => {
   const escrow = await getEscrowOr404(req, res);
   if (!escrow) return;
 
@@ -131,8 +132,8 @@ router.post("/:escrowId/release", requireRole("admin"), async (req, res) => {
 
   const now = new Date().toISOString();
   await db.update(escrows).set({ status: ESCROW_STATUS.RELEASE_IN_PROGRESS, releaseInProgressAt: now, updatedAt: now }).where(eq(escrows.id, escrow.id));
-  await logPaymentEvent("payout", payout.id, "payout_requested", null, PAYOUT_STATUS.PENDING, { requestedBy: req.user.id });
-  await logPaymentEvent("escrow", escrow.id, "status_changed", ESCROW_STATUS.RELEASE_PENDING, ESCROW_STATUS.RELEASE_IN_PROGRESS);
+  await logPaymentEvent("payout", payout.id, "payout_requested", null, PAYOUT_STATUS.PENDING, { requestedBy: req.user.id }, req.id);
+  await logPaymentEvent("escrow", escrow.id, "status_changed", ESCROW_STATUS.RELEASE_PENDING, ESCROW_STATUS.RELEASE_IN_PROGRESS, undefined, req.id);
 
   const { testOutcome, testForceReceipt, testDelayMs } = req.body || {};
   const daraja = await b2cPayment({
@@ -149,12 +150,12 @@ router.post("/:escrowId/release", requireRole("admin"), async (req, res) => {
     status: PAYOUT_STATUS.REQUESTED,
     updatedAt: new Date().toISOString(),
   }).where(eq(payouts.id, payout.id));
-  await logPaymentEvent("payout", payout.id, "b2c_sent", PAYOUT_STATUS.PENDING, PAYOUT_STATUS.REQUESTED, { daraja });
+  await logPaymentEvent("payout", payout.id, "b2c_sent", PAYOUT_STATUS.PENDING, PAYOUT_STATUS.REQUESTED, { daraja }, req.id);
 
   const [updatedEscrow] = await db.select().from(escrows).where(eq(escrows.id, escrow.id));
   const [updatedPayout] = await db.select().from(payouts).where(eq(payouts.id, payout.id));
   res.status(201).json({ escrow: updatedEscrow, payout: updatedPayout });
-});
+}));
 
 /**
  * POST /api/escrows/:escrowId/mark-payment-reversed (admin)
@@ -162,7 +163,7 @@ router.post("/:escrowId/release", requireRole("admin"), async (req, res) => {
  * this implementation's resolution of the spec's open "unverified webhook"
  * item. Only legal while funds are still held, before any release.
  */
-router.post("/:escrowId/mark-payment-reversed", requireRole("admin"), async (req, res) => {
+router.post("/:escrowId/mark-payment-reversed", requireRole("admin"), asyncHandler(async (req, res) => {
   const escrow = await getEscrowOr404(req, res);
   if (!escrow) return;
   if (escrow.status !== ESCROW_STATUS.HELD) {
@@ -170,16 +171,16 @@ router.post("/:escrowId/mark-payment-reversed", requireRole("admin"), async (req
   }
   const now = new Date().toISOString();
   await db.update(escrows).set({ status: ESCROW_STATUS.PAYMENT_REVERSED, updatedAt: now }).where(eq(escrows.id, escrow.id));
-  await logPaymentEvent("escrow", escrow.id, "payment_reversed", ESCROW_STATUS.HELD, ESCROW_STATUS.PAYMENT_REVERSED, { markedBy: req.user.id });
+  await logPaymentEvent("escrow", escrow.id, "payment_reversed", ESCROW_STATUS.HELD, ESCROW_STATUS.PAYMENT_REVERSED, { markedBy: req.user.id }, req.id);
   const [updated] = await db.select().from(escrows).where(eq(escrows.id, escrow.id));
   res.json(updated);
-});
+}));
 
 /**
  * POST /api/escrows/:escrowId/mark-payout-reversed (admin)
  * The SETTLED -> PAYOUT_REVERSED edge — same reasoning, opposite leg.
  */
-router.post("/:escrowId/mark-payout-reversed", requireRole("admin"), async (req, res) => {
+router.post("/:escrowId/mark-payout-reversed", requireRole("admin"), asyncHandler(async (req, res) => {
   const escrow = await getEscrowOr404(req, res);
   if (!escrow) return;
   if (escrow.status !== ESCROW_STATUS.SETTLED) {
@@ -187,9 +188,9 @@ router.post("/:escrowId/mark-payout-reversed", requireRole("admin"), async (req,
   }
   const now = new Date().toISOString();
   await db.update(escrows).set({ status: ESCROW_STATUS.PAYOUT_REVERSED, updatedAt: now }).where(eq(escrows.id, escrow.id));
-  await logPaymentEvent("escrow", escrow.id, "payout_reversed", ESCROW_STATUS.SETTLED, ESCROW_STATUS.PAYOUT_REVERSED, { markedBy: req.user.id });
+  await logPaymentEvent("escrow", escrow.id, "payout_reversed", ESCROW_STATUS.SETTLED, ESCROW_STATUS.PAYOUT_REVERSED, { markedBy: req.user.id }, req.id);
   const [updated] = await db.select().from(escrows).where(eq(escrows.id, escrow.id));
   res.json(updated);
-});
+}));
 
 export default router;

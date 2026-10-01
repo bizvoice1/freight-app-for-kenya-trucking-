@@ -12,7 +12,7 @@
 
 import { Router } from "express";
 import { eq } from "drizzle-orm";
-import { db } from "../db/client.js";
+import { db, isUniqueConstraintError } from "../db/client.js";
 import { bookings, loads, trucks, drivers, trips, payments } from "../db/schema.js";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { BOOKING_STATUS } from "../domain/booking.js";
@@ -20,6 +20,7 @@ import { createTrip as buildTrip, ACTIVE_TRIP_STATUSES } from "../../../src/mode
 import { createPayment, NON_TERMINAL_PAYMENT_STATUSES } from "../domain/payment.js";
 import { logPaymentEvent } from "../services/ledger.js";
 import { stkPush, callbackUrl } from "../services/daraja.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -54,7 +55,7 @@ async function canViewBooking(req, booking) {
   return false;
 }
 
-router.get("/", async (req, res) => {
+router.get("/", asyncHandler(async (req, res) => {
   const { transporterId, loadId, status } = req.query;
 
   if (req.user.role === "fleet_owner" && transporterId && transporterId !== req.user.id) {
@@ -77,16 +78,16 @@ router.get("/", async (req, res) => {
   }
 
   res.json(rows);
-});
+}));
 
-router.get("/:bookingId", async (req, res) => {
+router.get("/:bookingId", asyncHandler(async (req, res) => {
   const booking = await getBookingOr404(req, res);
   if (!booking) return;
   if (!(await canViewBooking(req, booking))) {
     return res.status(403).json({ error: "You are not authorized to view this booking." });
   }
   res.json(booking);
-});
+}));
 
 /**
  * POST /api/bookings/:bookingId/assign
@@ -96,7 +97,7 @@ router.get("/:bookingId", async (req, res) => {
  * same invariant fleetService.assignDriverToTruck enforces on the
  * frontend, checked here against the backend's own snapshot of that data.
  */
-router.post("/:bookingId/assign", requireRole("fleet_owner"), async (req, res) => {
+router.post("/:bookingId/assign", requireRole("fleet_owner"), asyncHandler(async (req, res) => {
   const booking = await getBookingOr404(req, res);
   if (!booking) return;
   if (!ownsBooking(req, booking)) {
@@ -122,15 +123,21 @@ router.post("/:bookingId/assign", requireRole("fleet_owner"), async (req, res) =
   await db.update(bookings).set({ truckId, driverId, status: BOOKING_STATUS.ASSIGNED, updatedAt: now }).where(eq(bookings.id, booking.id));
   const [updated] = await db.select().from(bookings).where(eq(bookings.id, booking.id));
   res.json(updated);
-});
+}));
 
 /**
  * POST /api/bookings/:bookingId/create-trip
  * The final step: Booking -> Trip. Same invariants as tripService.js's
  * createTripFromBooking() on the frontend — truck/driver still paired, and
  * neither the truck, the driver, nor the load already has an active trip.
+ *
+ * Phase 4M — same check-then-act race as /accept: two concurrent create-trip
+ * calls for the same booking could both pass the `status === ASSIGNED` check
+ * before either inserts. The real guard is `trips.bookingId UNIQUE`
+ * (db/schema.js); the second concurrent INSERT is rejected by the database,
+ * caught below, and returned as 409 rather than creating a duplicate trip.
  */
-router.post("/:bookingId/create-trip", requireRole("fleet_owner"), async (req, res) => {
+router.post("/:bookingId/create-trip", requireRole("fleet_owner"), asyncHandler(async (req, res) => {
   const booking = await getBookingOr404(req, res);
   if (!booking) return;
   if (!ownsBooking(req, booking)) {
@@ -160,13 +167,20 @@ router.post("/:bookingId/create-trip", requireRole("fleet_owner"), async (req, r
     { loadId: load.id, bookingId: booking.id, truckId: truck.id, driverId: driver.id, pickup: load.origin, delivery: load.destination },
     existingTrips.length
   );
-  await db.insert(trips).values(trip);
+  try {
+    await db.insert(trips).values(trip);
+  } catch (err) {
+    if (isUniqueConstraintError(err)) {
+      return res.status(409).json({ error: `Booking ${booking.id} already has a trip (concurrent request detected).` });
+    }
+    throw err;
+  }
 
   const now = new Date().toISOString();
   await db.update(bookings).set({ tripId: trip.id, status: BOOKING_STATUS.TRIP_CREATED, updatedAt: now }).where(eq(bookings.id, booking.id));
 
   res.status(201).json(trip);
-});
+}));
 
 /**
  * POST /api/bookings/:bookingId/payment
@@ -177,8 +191,15 @@ router.post("/:bookingId/create-trip", requireRole("fleet_owner"), async (req, r
  * server-side, before Daraja is ever called (non-negotiable #2). Rejecting
  * a second attempt while a non-terminal one exists is idempotency layer #1
  * of Section 2.5's five ("STK request duplicated").
+ *
+ * Phase 4M — the "existingForBooking" check below is the same fast,
+ * insufficient-alone guard as /accept and /create-trip: two rapid POSTs
+ * could both pass it before either inserts. The real guard is the partial
+ * unique index `payments_one_inflight_per_booking` (db/schema.js) — the
+ * database rejects a second concurrent Pending/StkSent row for the same
+ * booking outright.
  */
-router.post("/:bookingId/payment", requireRole("shipper"), async (req, res) => {
+router.post("/:bookingId/payment", requireRole("shipper"), asyncHandler(async (req, res) => {
   const booking = await getBookingOr404(req, res);
   if (!booking) return;
 
@@ -201,7 +222,14 @@ router.post("/:bookingId/payment", requireRole("shipper"), async (req, res) => {
 
   const count = (await db.select().from(payments)).length;
   const payment = createPayment({ bookingId: booking.id, shipperId: req.user.id, amount: load.price, phoneNumber }, count);
-  await db.insert(payments).values(payment);
+  try {
+    await db.insert(payments).values(payment);
+  } catch (err) {
+    if (isUniqueConstraintError(err)) {
+      return res.status(409).json({ error: `A payment is already in progress for booking ${booking.id} (concurrent request detected).` });
+    }
+    throw err;
+  }
 
   const daraja = await stkPush({
     amount: payment.amount,
@@ -218,10 +246,10 @@ router.post("/:bookingId/payment", requireRole("shipper"), async (req, res) => {
     status: "StkSent",
     updatedAt: now,
   }).where(eq(payments.id, payment.id));
-  await logPaymentEvent("payment", payment.id, "stk_push_sent", "Pending", "StkSent", { daraja });
+  await logPaymentEvent("payment", payment.id, "stk_push_sent", "Pending", "StkSent", { daraja }, req.id);
 
   const [updated] = await db.select().from(payments).where(eq(payments.id, payment.id));
   res.status(201).json(updated);
-});
+}));
 
 export default router;

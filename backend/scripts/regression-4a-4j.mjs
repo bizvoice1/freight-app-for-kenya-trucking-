@@ -2,7 +2,13 @@
 // app.js (mount order changed so the two unauthenticated Daraja webhooks
 // can claim their paths before fleetRoutes' blanket requireAuth). Verifies
 // every pre-4K endpoint family still behaves identically.
+import Database from "better-sqlite3";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
 const BASE = process.env.BASE_URL || "http://localhost:4000";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DB_PATH = process.env.DATABASE_PATH || path.join(__dirname, "..", "behari.sqlite");
 const results = [];
 async function test(name, fn) {
   try { await fn(); results.push({ name, ok: true }); console.log("PASS -", name); }
@@ -102,9 +108,16 @@ async function main() {
     const drivers = (await api(james.token, "GET", "/api/drivers")).json;
     const peterDriver = drivers.find(d => d.name === "Peter Otieno");
 
-    // KBD/Peter may already be paired from the last 4K test cycle, or freed by it — accept either.
+    // KBD/Peter may have been freed by a prior 4K/4L/4M test cycle sharing
+    // this database (releaseFleetAssignment runs on every terminal trip) —
+    // re-pair directly, the same way a human using the Carrier app's fleet
+    // UI would before making the next booking. No backend endpoint exists
+    // for this (see backend/README.md's Scope section), so this is test-side.
     if (kbd.currentDriverId !== peterDriver.id) {
-      throw new Error("KBD 092K is not currently paired with Peter Otieno — run after a full 4K cycle, or re-pair via fleetService first.");
+      const db = new Database(DB_PATH);
+      db.prepare("UPDATE trucks SET current_driver_id = ?, status = 'Assigned' WHERE id = ?").run(peterDriver.id, kbd.id);
+      db.prepare("UPDATE drivers SET assigned_truck_id = ?, status = 'Assigned' WHERE id = ?").run(kbd.id, peterDriver.id);
+      db.close();
     }
 
     const assign = await api(james.token, "POST", `/api/bookings/${booking.id}/assign`, { truckId: kbd.id, driverId: peterDriver.id });

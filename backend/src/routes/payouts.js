@@ -12,6 +12,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { payouts } from "../db/schema.js";
 import { requireAuth } from "../auth/middleware.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -23,16 +24,16 @@ function canViewPayout(req, payout) {
   return false;
 }
 
-router.get("/:id", async (req, res) => {
+router.get("/:id", asyncHandler(async (req, res) => {
   const [payout] = await db.select().from(payouts).where(eq(payouts.id, req.params.id));
   if (!payout) return res.status(404).json({ error: `No payout found with id ${req.params.id}.` });
   if (!canViewPayout(req, payout)) {
     return res.status(403).json({ error: "You are not authorized to view this payout." });
   }
   res.json(payout);
-});
+}));
 
-router.get("/", async (req, res) => {
+router.get("/", asyncHandler(async (req, res) => {
   const { escrowId } = req.query;
   let rows = escrowId
     ? await db.select().from(payouts).where(eq(payouts.escrowId, escrowId))
@@ -44,6 +45,6 @@ router.get("/", async (req, res) => {
     rows = [];
   }
   res.json(rows);
-});
+}));
 
 export default router;

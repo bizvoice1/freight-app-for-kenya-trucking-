@@ -12,7 +12,8 @@
     "db:seed": "node src/db/seed.js",
     "test:4k": "node scripts/acceptance-4k.mjs",
     "test:4l": "node scripts/acceptance-4l.mjs",
-    "test:regression": "node scripts/regression-4a-4j.mjs"
+    "test:regression": "node scripts/regression-4a-4j.mjs",
+    "test:4m": "node scripts/attack-suite-4m.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",

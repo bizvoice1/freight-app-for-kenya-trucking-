@@ -43,6 +43,7 @@ import { ESCROW_STATUS, evaluateReleaseEligibility } from "../domain/escrow.js";
 import { logPaymentEvent } from "../services/ledger.js";
 import { NOTIFICATION_TYPE } from "../domain/notification.js";
 import { notifyUser, notifyUsers, allAdminUserIds } from "../services/notifications.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -202,7 +203,7 @@ async function releaseFleetAssignment(truckId) {
  * booking (a trip without one) or no escrow (payment never completed) are
  * both legitimate "not eligible" outcomes, not errors.
  */
-async function maybeMakeEscrowEligibleForRelease(trip) {
+async function maybeMakeEscrowEligibleForRelease(trip, requestId) {
   if (!trip.bookingId) return;
   const [booking] = await db.select().from(bookings).where(eq(bookings.id, trip.bookingId));
   if (!booking) return;
@@ -214,7 +215,7 @@ async function maybeMakeEscrowEligibleForRelease(trip) {
 
   const now = new Date().toISOString();
   await db.update(escrows).set({ status: ESCROW_STATUS.RELEASE_PENDING, releasePendingAt: now, updatedAt: now }).where(eq(escrows.id, escrow.id));
-  await logPaymentEvent("escrow", escrow.id, "status_changed", ESCROW_STATUS.HELD, ESCROW_STATUS.RELEASE_PENDING, { tripId: trip.id });
+  await logPaymentEvent("escrow", escrow.id, "status_changed", ESCROW_STATUS.HELD, ESCROW_STATUS.RELEASE_PENDING, { tripId: trip.id }, requestId);
 
   await notifyUser(booking.transporterId, NOTIFICATION_TYPE.RELEASE_PENDING,
     "Delivery confirmed — payout pending", `Escrow ${escrow.id} for booking ${booking.id} is ready for release.`,
@@ -245,7 +246,7 @@ async function notifyTripStatusChanged(trip, nextStatus) {
  * authorized), not 409 (invalid transition) — the ownership question is
  * more fundamental than the sequencing question.
  */
-router.post("/:tripId/status", async (req, res) => {
+router.post("/:tripId/status", asyncHandler(async (req, res) => {
   const trip = await getTripOr404(req, res);
   if (!trip) return;
 
@@ -266,12 +267,12 @@ router.post("/:tripId/status", async (req, res) => {
 
   await db.update(trips).set(updates).where(eq(trips.id, trip.id));
   if (TERMINAL_TRIP_STATUSES.has(nextStatus)) await releaseFleetAssignment(trip.truckId);
-  if (nextStatus === TRIP_STATUS.DELIVERED) await maybeMakeEscrowEligibleForRelease({ ...trip, ...updates });
+  if (nextStatus === TRIP_STATUS.DELIVERED) await maybeMakeEscrowEligibleForRelease({ ...trip, ...updates }, req.id);
   await notifyTripStatusChanged(trip, nextStatus);
 
   const [updated] = await db.select().from(trips).where(eq(trips.id, trip.id));
   res.json(updated);
-});
+}));
 
 /**
  * GET /api/trips?loadId=&truckId=&driverId=&status=
@@ -280,7 +281,7 @@ router.post("/:tripId/status", async (req, res) => {
  * passing a truckId they don't own, simply narrows an already-empty set
  * rather than leaking someone else's trip.
  */
-router.get("/", async (req, res) => {
+router.get("/", asyncHandler(async (req, res) => {
   const { loadId, truckId, driverId, status } = req.query;
 
   const scope = await _visibleTripsFilter(req);
@@ -307,20 +308,20 @@ router.get("/", async (req, res) => {
   }
 
   res.json(rows);
-});
+}));
 
 /* GET /api/trips/:tripId — scoped to what this caller may view (see canViewTrip) */
-router.get("/:tripId", async (req, res) => {
+router.get("/:tripId", asyncHandler(async (req, res) => {
   const trip = await getTripOr404(req, res);
   if (!trip) return;
   if (!(await canViewTrip(req, trip))) {
     return res.status(403).json({ error: "You are not authorized to view this trip." });
   }
   res.json(trip);
-});
+}));
 
 /* POST /api/trips/:tripId/tracking/start */
-router.post("/:tripId/tracking/start", requireRole("driver"), async (req, res) => {
+router.post("/:tripId/tracking/start", requireRole("driver"), asyncHandler(async (req, res) => {
   const trip = await getTripOr404(req, res);
   if (!trip) return;
   if (!ownsTrip(req, trip)) {
@@ -330,17 +331,17 @@ router.post("/:tripId/tracking/start", requireRole("driver"), async (req, res) =
     return res.status(409).json({ error: `Trip ${trip.id} is not active (status: ${trip.status}).` });
   }
   res.json({ started: true });
-});
+}));
 
 /* POST /api/trips/:tripId/tracking/stop */
-router.post("/:tripId/tracking/stop", requireRole("driver"), async (req, res) => {
+router.post("/:tripId/tracking/stop", requireRole("driver"), asyncHandler(async (req, res) => {
   const trip = await getTripOr404(req, res);
   if (!trip) return;
   if (!ownsTrip(req, trip)) {
     return res.status(403).json({ error: "This trip is not assigned to the authenticated driver." });
   }
   res.json({ stopped: true });
-});
+}));
 
 /**
  * POST /api/trips/:tripId/location
@@ -351,7 +352,7 @@ router.post("/:tripId/tracking/stop", requireRole("driver"), async (req, res) =>
  * frontend's trackingService.js design from Phase 4E. This is the same
  * rule enforced at the real trust boundary instead of just in a browser.
  */
-router.post("/:tripId/location", requireRole("driver"), async (req, res) => {
+router.post("/:tripId/location", requireRole("driver"), asyncHandler(async (req, res) => {
   const trip = await getTripOr404(req, res);
   if (!trip) return;
   if (!ownsTrip(req, trip)) {
@@ -375,10 +376,10 @@ router.post("/:tripId/location", requireRole("driver"), async (req, res) => {
   await db.update(trips).set({ latestLocationId: update.id, updatedAt: new Date().toISOString() }).where(eq(trips.id, trip.id));
 
   res.json({ accepted: true, update });
-});
+}));
 
 /* GET /api/trips/:tripId/location/latest — scoped to what this caller may view */
-router.get("/:tripId/location/latest", async (req, res) => {
+router.get("/:tripId/location/latest", asyncHandler(async (req, res) => {
   const trip = await getTripOr404(req, res);
   if (!trip) return;
   if (!(await canViewTrip(req, trip))) {
@@ -386,10 +387,10 @@ router.get("/:tripId/location/latest", async (req, res) => {
   }
   const location = await _latestLocation(trip.id);
   res.json(location || null);
-});
+}));
 
 /* GET /api/trips/:tripId/location/history — chronological, isolated to this trip, scoped to what this caller may view */
-router.get("/:tripId/location/history", async (req, res) => {
+router.get("/:tripId/location/history", asyncHandler(async (req, res) => {
   const trip = await getTripOr404(req, res);
   if (!trip) return;
   if (!(await canViewTrip(req, trip))) {
@@ -401,7 +402,7 @@ router.get("/:tripId/location/history", async (req, res) => {
     .where(eq(locationUpdates.tripId, trip.id))
     .orderBy(asc(locationUpdates.timestamp));
   res.json(history);
-});
+}));
 
 async function _countLocationUpdates(tripId) {
   const rows = await db.select().from(locationUpdates).where(eq(locationUpdates.tripId, tripId));

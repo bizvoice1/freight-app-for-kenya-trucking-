@@ -1,12 +1,123 @@
-# Behari Freight — Backend (Phases 4F–4L)
+# Behari Freight — Backend (Phases 4F–4M)
 
 Real backend: auth, GPS tracking (4F), shared live-tracking reads (4G), the
 real Load → Booking → Trip chain (4H), authorization hardening (4I), a
-server-authoritative trip lifecycle (4J), Daraja M-Pesa escrow (4K), and
-narrow in-app notifications (4L) — Behari controls the payment lifecycle,
-not just freight matching and tracking, and every party now has a record of
-what happened to their money and their trip. All server-identity-checked,
-all in one SQLite (dev)/Postgres-ready database.
+server-authoritative trip lifecycle (4J), Daraja M-Pesa escrow (4K), narrow
+in-app notifications (4L), and production hardening + a deliberate
+attack/abuse suite (4M) — the last engineering phase before 4N, a real
+pilot with real money. All server-identity-checked, all in one SQLite
+(dev)/Postgres-ready database.
+
+## Hardening + the attack suite (Phase 4M)
+
+4M's brief, stated plainly: **take the existing system and deliberately try
+to break it. Not redesign it. Not add features.** Two real bugs came out of
+that — one found while planning, one found by the attack suite itself —
+plus a set of concrete, dependency-free production-safety changes.
+
+**The async-error hole (the single highest-value fix):** every route
+handler in this backend was `async` with zero `try`/`catch`, and Express 4
+does **not** forward a rejected promise to error-handling middleware on its
+own. An unexpected error anywhere — a DB constraint not already caught, a
+bug — left the request hanging forever: no response, no 500, nothing but a
+client-side timeout. `utils/asyncHandler.js` wraps every handler in every
+route file; a thrown error now reaches `app.js`'s existing error middleware
+and comes back as a clean, logged 500 instead.
+
+**A genuine concurrency gap the attack suite found, not assumed:** the same
+check-then-act race already fixed once in 4K (`payouts_one_inflight_per_
+escrow`) turned out to exist in three more places — two transporters
+accepting the same load, two concurrent `create-trip` calls on one booking,
+and two concurrent payment initiations on one booking could each have
+produced a duplicate row. Closed the same way: `bookings.loadId UNIQUE`,
+`trips.bookingId UNIQUE`, and a new partial index,
+`payments_one_inflight_per_booking` (db/schema.js) — the database rejects
+the second concurrent INSERT; the route catches it and returns 409.
+`scripts/attack-suite-4m.mjs`'s three concurrency tests fire genuinely
+parallel requests (not sequential retries) to prove it.
+
+**Payment/escrow writes that must be atomic now are:** the STK callback's
+payment-status flip + escrow creation, and the B2C callback's payout
+confirmation + escrow settlement, are each wrapped in `db.transaction()` —
+previously two separate writes, where a crash or constraint violation
+between them could leave a payment marked Paid with no escrow ever created.
+(better-sqlite3 transactions are synchronous — the callback inside
+`db.transaction()` must not be `async`/`awaited`; this cost a real bug
+during implementation, caught immediately by `npm run test:4k` going from
+19/19 to failing.)
+
+**Startup safety:** `auth/jwt.js` has always fallen back to a hardcoded
+dev secret when `JWT_SECRET` is unset — convenient for `npm run dev`,
+dangerous if it ever happened in production unnoticed. `server.js` now
+refuses to start (`process.exit(1)`, clear log message) when
+`NODE_ENV=production` and `JWT_SECRET` is unset; every other combination
+(prod+secret, dev+no-secret, dev+secret) starts normally, verified
+directly against all four. Graceful shutdown (`SIGTERM`/`SIGINT`) closes
+the HTTP server and the sqlite handle instead of the process dying
+mid-request. `GET /ready` (actually queries the database) joins the
+existing `GET /health` (liveness only) — a load balancer's two different
+questions.
+
+**CORS allow-list:** `ALLOWED_ORIGINS` (comma-separated env var) restricts
+origins; unset, it behaves exactly like the old bare `cors()` so local dev
+stays zero-config — only meaningful once this is deployed somewhere with a
+real frontend origin to name.
+
+**Structured, dependency-free logging + correlation:** every request gets
+a short id (`req.id`), logged on completion (`method path status
+durationMs requestId`) and echoed on error responses. `payment_events`
+gained a nullable `requestId` column (`services/ledger.js`'s `logPayment
+Event` takes it as an optional last argument) — the payment correlation id
+the brief asked for, built on the audit trail 4K already established
+rather than a new system. No new dependency; swapping in Winston/Pino
+later changes one file, not every call site.
+
+**Indexes:** plain (non-unique) indexes on the foreign-key columns every
+ownership check filters on constantly — `bookings.transporterId`,
+`loads.shipperId`, `trips.{loadId,truckId,driverId}`,
+`notifications.userId` — schema-only, no query or business-logic changes.
+
+**The attack suite — `npm run test:4m`, 24/24:** expired/malformed/
+wrong-secret/`alg:none` JWTs, malformed JSON bodies, garbage route-param
+IDs (confirms Drizzle's parameterized queries, not string-built SQL),
+`null`/array values where a scalar was expected, an HTTP-method/unknown-
+route sweep (wrong verb, unknown path, empty path segment — all clean
+4xx, never a hang), the three new concurrency cases above, repeated/
+backward trip-status transitions, and a systematic cross-tenant sweep
+across bookings/trips/payments/escrows/notifications. Cases already proven
+by `test:4k` (duplicate callbacks, wrong amount, duplicate receipt,
+concurrent release, second-payout schema backstop, reversal) and
+`test:regression` (cross-tenant 403s on trucks/loads/location,
+stage-skipping) are referenced, not duplicated — so there are never two
+copies of the same assertion silently drifting apart.
+
+**Verified, same standard as every prior phase** — clean database, fresh
+seed, restart: `test:4k` 19/19, `test:4l` 9/9, `test:regression` 13/13,
+`test:4m` 24/24, all four run in sequence against one freshly seeded
+database. Browser check: frontend loads with zero console errors (4M is
+backend-only, same reasoning as 4K/4L).
+
+### Pre-4N checklist — deliberately deferred, not forgotten
+
+4M implements what's concrete and verifiable without picking an external
+service or guessing untested thresholds. Before a real pilot (4N) with real
+traffic, still needed:
+
+- **Rate limiting** — no reverse proxy or public deployment yet to size
+  real thresholds against; guessing one now risks either no protection or
+  blocking legitimate pilot traffic.
+- **Pagination** — current data volumes don't warrant it, and the right
+  page size depends on who's actually consuming the API (mobile app? web
+  dashboard?), not yet decided.
+- **A real logging/error-tracking provider** (Sentry, Winston+ELK, or
+  similar) — a product/ops decision (which service, what budget), not
+  this session's call; the structured console logs above are the
+  dependency-free stand-in, upgradeable later without touching call sites.
+- **Secrets management beyond `.env`** — fine for a single-process local
+  pilot; a real deployment needs a real secrets store.
+- **Production deployment configuration itself** — needs a real target
+  (a host, a process manager, a reverse proxy) to configure against; code
+  alone can't anticipate that.
 
 ## Notifications (Phase 4L)
 
@@ -257,6 +368,9 @@ authenticated caller's real identity.
 ## Endpoints
 
 ```
+GET  /health                                  liveness — process is up, no dependency check
+GET  /ready                                   readiness — Phase 4M, actually queries the database
+
 POST /api/auth/login                          { phone, pin, role } -> { token, user }
 
 GET  /api/trips?loadId=&truckId=&driverId=&status=

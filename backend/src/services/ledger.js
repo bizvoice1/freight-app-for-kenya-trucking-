@@ -17,8 +17,9 @@ import { paymentEvents, reconciliationFlags } from "../db/schema.js";
  * @param {string|null} fromStatus
  * @param {string|null} toStatus
  * @param {any} [payload] - the raw callback/request body, or any other JSON-serialisable context
+ * @param {string} [requestId] - Phase 4M — the triggering request's req.id (app.js), for correlating a payment_events row back to a specific inbound request/response pair in the server logs. Optional and backward compatible — callers that don't have one (or aren't inside a request at all) omit it.
  */
-export async function logPaymentEvent(entityType, entityId, eventType, fromStatus, toStatus, payload) {
+export async function logPaymentEvent(entityType, entityId, eventType, fromStatus, toStatus, payload, requestId) {
   const count = (await db.select().from(paymentEvents)).length;
   await db.insert(paymentEvents).values({
     id:         `EVT-${1000 + count}`,
@@ -28,6 +29,7 @@ export async function logPaymentEvent(entityType, entityId, eventType, fromStatu
     fromStatus: fromStatus ?? null,
     toStatus:   toStatus ?? null,
     payload:    payload !== undefined ? JSON.stringify(payload) : null,
+    requestId:  requestId ?? null,
     createdAt:  new Date().toISOString(),
   });
 }

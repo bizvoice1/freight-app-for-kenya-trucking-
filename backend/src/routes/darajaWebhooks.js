@@ -27,6 +27,7 @@ import { ESCROW_STATUS, createEscrow } from "../domain/escrow.js";
 import { logPaymentEvent, flagReconciliation } from "../services/ledger.js";
 import { NOTIFICATION_TYPE } from "../domain/notification.js";
 import { notifyUser, notifyUsers, allAdminUserIds } from "../services/notifications.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
 const router = Router();
 const ACK = { ResultCode: 0, ResultDesc: "Accepted" };
@@ -44,7 +45,7 @@ function paramsToMap(resultParameters) {
 }
 
 /** POST /api/payments/callback/stk */
-router.post("/payments/callback/stk", async (req, res) => {
+router.post("/payments/callback/stk", asyncHandler(async (req, res) => {
   const cb = req.body?.Body?.stkCallback;
   const checkoutRequestId = cb?.CheckoutRequestID;
   if (!checkoutRequestId) return res.status(400).json({ error: "Missing CheckoutRequestID." });
@@ -55,7 +56,7 @@ router.post("/payments/callback/stk", async (req, res) => {
     return res.status(200).json(ACK);
   }
   if (payment.status !== PAYMENT_STATUS.STK_SENT) {
-    await logPaymentEvent("payment", payment.id, "duplicate_callback_ignored", payment.status, payment.status, req.body);
+    await logPaymentEvent("payment", payment.id, "duplicate_callback_ignored", payment.status, payment.status, req.body, req.id);
     return res.status(200).json(ACK);
   }
 
@@ -76,30 +77,41 @@ router.post("/payments/callback/stk", async (req, res) => {
       return res.status(200).json(ACK);
     }
 
+    const count = (await db.select().from(escrows)).length;
+    const escrow = createEscrow({ bookingId: payment.bookingId, paymentId: payment.id, amount: payment.amount }, count);
+
+    // Phase 4M — the payment status flip and the escrow creation are one
+    // transaction, not two separate writes: without this, a crash or a
+    // constraint violation between them could leave a payment marked Paid
+    // with no escrow ever created for it. Either both happen or neither does.
+    // better-sqlite3 transactions are synchronous — the callback must NOT
+    // be async/awaited internally (drizzle/better-sqlite3 throws "Transaction
+    // function cannot return a promise" otherwise); call .run() directly.
     try {
-      await db.update(payments).set({
-        status: PAYMENT_STATUS.PAID,
-        mpesaReceiptNumber: receipt,
-        resultCode: cb.ResultCode,
-        resultDesc: cb.ResultDesc,
-        updatedAt: now,
-      }).where(eq(payments.id, payment.id));
+      db.transaction((tx) => {
+        tx.update(payments).set({
+          status: PAYMENT_STATUS.PAID,
+          mpesaReceiptNumber: receipt,
+          resultCode: cb.ResultCode,
+          resultDesc: cb.ResultDesc,
+          updatedAt: now,
+        }).where(eq(payments.id, payment.id)).run();
+        tx.insert(escrows).values(escrow).run();
+      });
     } catch (err) {
       if (isUniqueConstraintError(err)) {
-        // Schema-level backstop: the application check above should have
-        // already caught this, but the database is the real guarantee.
+        // Schema-level backstop — mpesaReceiptNumber reuse or (should the
+        // payments_one_inflight_per_booking index ever be bypassed)
+        // escrows.bookingId reuse both land here as the same honest outcome:
+        // this callback is not accepted as new money movement.
         await flagReconciliation("duplicate_receipt_number", "payment", payment.id, req.body);
         return res.status(200).json(ACK);
       }
       throw err;
     }
 
-    const count = (await db.select().from(escrows)).length;
-    const escrow = createEscrow({ bookingId: payment.bookingId, paymentId: payment.id, amount: payment.amount }, count);
-    await db.insert(escrows).values(escrow);
-
-    await logPaymentEvent("payment", payment.id, "callback_received", PAYMENT_STATUS.STK_SENT, PAYMENT_STATUS.PAID, req.body);
-    await logPaymentEvent("escrow", escrow.id, "status_changed", null, ESCROW_STATUS.HELD, { paymentId: payment.id });
+    await logPaymentEvent("payment", payment.id, "callback_received", PAYMENT_STATUS.STK_SENT, PAYMENT_STATUS.PAID, req.body, req.id);
+    await logPaymentEvent("escrow", escrow.id, "status_changed", null, ESCROW_STATUS.HELD, { paymentId: payment.id }, req.id);
 
     await notifyUser(payment.shipperId, NOTIFICATION_TYPE.PAYMENT_CONFIRMED,
       "Payment confirmed", `Your payment of ${payment.amount} for booking ${payment.bookingId} was received.`,
@@ -114,7 +126,7 @@ router.post("/payments/callback/stk", async (req, res) => {
     const failStatus = cb.ResultCode === 1032 ? PAYMENT_STATUS.CANCELLED : PAYMENT_STATUS.FAILED;
     await db.update(payments).set({ status: failStatus, resultCode: cb.ResultCode, resultDesc: cb.ResultDesc, updatedAt: now })
       .where(eq(payments.id, payment.id));
-    await logPaymentEvent("payment", payment.id, "callback_received", PAYMENT_STATUS.STK_SENT, failStatus, req.body);
+    await logPaymentEvent("payment", payment.id, "callback_received", PAYMENT_STATUS.STK_SENT, failStatus, req.body, req.id);
 
     await notifyUser(payment.shipperId, NOTIFICATION_TYPE.PAYMENT_FAILED,
       failStatus === PAYMENT_STATUS.CANCELLED ? "Payment cancelled" : "Payment failed",
@@ -123,10 +135,10 @@ router.post("/payments/callback/stk", async (req, res) => {
   }
 
   res.status(200).json(ACK);
-});
+}));
 
 /** POST /api/payouts/callback/b2c */
-router.post("/payouts/callback/b2c", async (req, res) => {
+router.post("/payouts/callback/b2c", asyncHandler(async (req, res) => {
   const result = req.body?.Result;
   const conversationId = result?.ConversationID;
   if (!conversationId) return res.status(400).json({ error: "Missing ConversationID." });
@@ -137,7 +149,7 @@ router.post("/payouts/callback/b2c", async (req, res) => {
     return res.status(200).json(ACK);
   }
   if (payout.status !== PAYOUT_STATUS.REQUESTED) {
-    await logPaymentEvent("payout", payout.id, "duplicate_callback_ignored", payout.status, payout.status, req.body);
+    await logPaymentEvent("payout", payout.id, "duplicate_callback_ignored", payout.status, payout.status, req.body, req.id);
     return res.status(200).json(ACK);
   }
 
@@ -159,14 +171,24 @@ router.post("/payouts/callback/b2c", async (req, res) => {
       return res.status(200).json(ACK);
     }
 
+    // Phase 4M — payout confirmation and escrow settlement are one
+    // transaction: either both happen, or a constraint violation/crash
+    // leaves neither changed (never a Confirmed payout against an escrow
+    // that's still ReleaseInProgress). Synchronous callback, same reason as
+    // the STK callback above — better-sqlite3 transactions can't be async.
     try {
-      await db.update(payouts).set({
-        status: PAYOUT_STATUS.CONFIRMED,
-        transactionId: receipt,
-        resultCode: result.ResultCode,
-        resultDesc: result.ResultDesc,
-        updatedAt: now,
-      }).where(eq(payouts.id, payout.id));
+      db.transaction((tx) => {
+        tx.update(payouts).set({
+          status: PAYOUT_STATUS.CONFIRMED,
+          transactionId: receipt,
+          resultCode: result.ResultCode,
+          resultDesc: result.ResultDesc,
+          updatedAt: now,
+        }).where(eq(payouts.id, payout.id)).run();
+        if (escrow) {
+          tx.update(escrows).set({ status: ESCROW_STATUS.SETTLED, settledAt: now, updatedAt: now }).where(eq(escrows.id, escrow.id)).run();
+        }
+      });
     } catch (err) {
       if (isUniqueConstraintError(err)) {
         await flagReconciliation("duplicate_receipt_number", "payout", payout.id, req.body);
@@ -176,10 +198,9 @@ router.post("/payouts/callback/b2c", async (req, res) => {
     }
 
     if (escrow) {
-      await db.update(escrows).set({ status: ESCROW_STATUS.SETTLED, settledAt: now, updatedAt: now }).where(eq(escrows.id, escrow.id));
-      await logPaymentEvent("escrow", escrow.id, "status_changed", ESCROW_STATUS.RELEASE_IN_PROGRESS, ESCROW_STATUS.SETTLED);
+      await logPaymentEvent("escrow", escrow.id, "status_changed", ESCROW_STATUS.RELEASE_IN_PROGRESS, ESCROW_STATUS.SETTLED, undefined, req.id);
     }
-    await logPaymentEvent("payout", payout.id, "callback_received", PAYOUT_STATUS.REQUESTED, PAYOUT_STATUS.CONFIRMED, req.body);
+    await logPaymentEvent("payout", payout.id, "callback_received", PAYOUT_STATUS.REQUESTED, PAYOUT_STATUS.CONFIRMED, req.body, req.id);
 
     await notifyUser(payout.transporterId, NOTIFICATION_TYPE.PAYOUT_CONFIRMED,
       "Payout confirmed", `Your payout of ${payout.amount} for escrow ${payout.escrowId} has been paid.`,
@@ -192,9 +213,9 @@ router.post("/payouts/callback/b2c", async (req, res) => {
       // not stuck, not a silent success. This is also what frees the
       // payouts_one_inflight_per_escrow index for the next /release attempt.
       await db.update(escrows).set({ status: ESCROW_STATUS.RELEASE_PENDING, updatedAt: now }).where(eq(escrows.id, escrow.id));
-      await logPaymentEvent("escrow", escrow.id, "status_changed", ESCROW_STATUS.RELEASE_IN_PROGRESS, ESCROW_STATUS.RELEASE_PENDING);
+      await logPaymentEvent("escrow", escrow.id, "status_changed", ESCROW_STATUS.RELEASE_IN_PROGRESS, ESCROW_STATUS.RELEASE_PENDING, undefined, req.id);
     }
-    await logPaymentEvent("payout", payout.id, "callback_received", PAYOUT_STATUS.REQUESTED, PAYOUT_STATUS.FAILED, req.body);
+    await logPaymentEvent("payout", payout.id, "callback_received", PAYOUT_STATUS.REQUESTED, PAYOUT_STATUS.FAILED, req.body, req.id);
 
     await notifyUser(payout.transporterId, NOTIFICATION_TYPE.PAYOUT_FAILED,
       "Payout failed", `Your payout for escrow ${payout.escrowId} failed (${result.ResultDesc}) and will need to be retried.`,
@@ -206,6 +227,6 @@ router.post("/payouts/callback/b2c", async (req, res) => {
   }
 
   res.status(200).json(ACK);
-});
+}));
 
 export default router;
