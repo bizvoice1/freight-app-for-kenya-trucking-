@@ -22,7 +22,17 @@
  *   trust boundary).
  */
 
-const API_BASE = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) || "http://localhost:4000";
+// A real driver opens this screen on their OWN phone, not the machine
+// running the backend — hardcoding "localhost" here means the phone calls
+// itself and every request silently fails to connect (surfaces as "Could
+// not reach the tracking backend", i.e. "I can't log in"). Default to
+// whatever host actually served this page (vite.config.js already exposes
+// the dev server on the LAN via host:true) so it resolves correctly
+// whether opened locally or from another device on the same network, with
+// no per-network manual config. VITE_API_BASE_URL still wins if set.
+const API_BASE = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL)
+  || (typeof window !== "undefined" && `http://${window.location.hostname}:4000`)
+  || "http://localhost:4000";
 const TOKEN_KEY = "behari_driver_token";
 const USER_KEY  = "behari_driver_user";
 

@@ -17,7 +17,12 @@
  * portal login, not a hole in trip/location authorization.
  */
 
-const API_BASE = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) || "http://localhost:4000";
+// See trackingService.js's identical note: default to whatever host served
+// this page, not a hardcoded "localhost", so a portal opened from another
+// device on the LAN still reaches the right backend.
+const API_BASE = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL)
+  || (typeof window !== "undefined" && `http://${window.location.hostname}:4000`)
+  || "http://localhost:4000";
 
 // Matches backend/src/db/seed.js exactly — see backend/README.md's dev login table.
 const DEMO_CREDENTIALS = {
