@@ -103,3 +103,26 @@ export function useAllLiveTrips(role = "admin") {
 
   return state;
 }
+
+/** Polls the role-scoped trip list (GET /api/trips). Transporter: own trucks' trips. Admin: all. */
+export function useTripList(role) {
+  const [state, setState] = useState({ trips: [], loading: true, error: null });
+  const cancelledRef = useRef(false);
+  const tickRef = useRef(null);
+  useEffect(() => {
+    cancelledRef.current = false;
+    async function tick() {
+      try {
+        const trips = await listTrips({}, role);
+        if (!cancelledRef.current) setState({ trips, loading: false, error: null });
+      } catch (err) {
+        if (!cancelledRef.current) setState(s => ({ ...s, loading: false, error: err.message }));
+      }
+    }
+    tickRef.current = tick;
+    tick();
+    const id = setInterval(tick, POLL_MS);
+    return () => { cancelledRef.current = true; clearInterval(id); };
+  }, [role]);
+  return { ...state, refresh: () => tickRef.current && tickRef.current() };
+}

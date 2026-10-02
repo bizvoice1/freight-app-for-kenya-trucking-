@@ -3,6 +3,7 @@
 // failure cases from docs/4K-DARAJA-SPEC.md Section 9, plus the concurrency
 // test, against the REAL running server (not imported functions).
 import Database from "better-sqlite3";
+import { driveSteps } from "./gate-helper.mjs";
 import { NBO_NKU } from "./fixtures.mjs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -123,10 +124,7 @@ async function cancelTrip(tripId) {
 /** Drives a trip from Assigned all the way to Delivered (driver steps + shipper confirms). */
 async function driveToDelivered(tripId, shipperCtx = shipper) {
   const steps = ["Dispatched", "At Pickup", "Loading", "In Transit", "At Delivery"];
-  for (const status of steps) {
-    const r = await api(peterDriver.token, "POST", `/api/trips/${tripId}/status`, { status });
-    assert(r.status === 200, `driver step to ${status} failed: ${JSON.stringify(r.json)}`);
-  }
+  await driveSteps({ tripId, driverToken: peterDriver.token, statuses: steps });
   const r = await api(shipperCtx.token, "POST", `/api/trips/${tripId}/status`, { status: "Delivered" });
   assert(r.status === 200, `shipper confirm Delivered failed: ${JSON.stringify(r.json)}`);
   return r.json;

@@ -6,25 +6,23 @@ import { CORRIDORS, CARGO_TYPES, TRUCK_TYPES, CARGO_UNITS, TRUCK_COUNT_OPTIONS }
 // postedLoads) instead of its own private SHIPMENTS_SEED/SHIPMENT_HISTORY_SEED
 // arrays. See src/services/loadViews.js for the merge/formatting logic.
 // data/shipments.js itself is left untouched (not yet deleted).
-import { getAllKnownLoads, toShipperShipmentView } from "./src/services/loadViews.js";
-import { sortNewestFirst, makePlace, resolveDistance, distLabel, decodePolyline, metersToKm } from "./src/models/geo.js";
+import { sortNewestFirst, makePlace, resolveDistance, distLabel, metersToKm } from "./src/models/geo.js";
 import PlaceInput from "./src/components/maps/PlaceInput.jsx";
-import GoogleMap from "./src/components/maps/GoogleMap.jsx";
 import { hasMapsKey } from "./src/services/googleMaps.js";
 // Step 8: Rating dimensions
 import { CARRIER_RATING_DIMS } from "./src/models/rating.js";
 // Matching engine — shared UI components (Truck ↔ Cargo)
 import { useCommerce } from "./src/hooks/useCommerce.js";
-import { OfferThread, AgreedPriceBlock, CommerceBell, DemoBadge } from "./src/components/negotiation/negotiation.jsx";
+import { OfferThread, AgreedPriceBlock, CommerceBell } from "./src/components/negotiation/negotiation.jsx";
 import { ksh, paymentView } from "./src/models/backendLoad.js";
-import MatchCard from "./src/components/matching/MatchCard.jsx";
-import NearbyList from "./src/components/matching/NearbyList.jsx";
 // Phase 4G — real backend GPS (Phase 4F), distinct from the simulated map
 // below it. Most shipments have no backend-tracked trip yet (see
 // backend/README.md's scope note) — LiveTrackingPanel renders "Not
 // currently tracked live" for those rather than pretending otherwise.
 import { useLiveTripByLoadId } from "./src/hooks/useLiveTrip.js";
 import LiveTrackingPanel from "./src/components/tracking/LiveTrackingPanel.jsx";
+import NotLive from "./src/components/NotLive.jsx";
+import TripTrackingModal from "./src/components/tracking/TripTrackingModal.jsx";
 
 const C = {
   white:"#FFFFFF", bg:"#F6F6F6", border:"#EBEBEB",
@@ -77,13 +75,10 @@ function ProgressBar({ value }) {
 }
 
 /* ── POST CARGO MODAL ───────────────────────────────────── */
-function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatchesForCargo = ()=>Promise.resolve([]), onRequestMatch = ()=>{}, onCheckNewCargoForMatches = ()=>{} }) {
+function PostModal({ onClose, onPostLoad }) {
   const [step,        setStep]        = useState(1);
   const [escrowState, setEscrowState] = useState("idle"); // idle | matching | posted
-  const [createdLoad,   setCreatedLoad]   = useState(null);
   const [postError,     setPostError]     = useState(null);
-  const [matchesFound,  setMatchesFound]  = useState([]);
-  const [loadingMatches,setLoadingMatches]= useState(false);
   const [form, setForm] = useState({
     pickup:"", destination:"", cargoType:"", description:"",
     pickupPlace:null, deliveryPlace:null, 
@@ -123,13 +118,7 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
     let newLoad;
     try { newLoad = await onPostLoad(form); }
     catch (e) { setPostError(e?.message || "Could not post cargo."); return; }
-    setCreatedLoad(newLoad);
-    setEscrowState("matching");
-    setLoadingMatches(true);
-    const results = await onFindMatchesForCargo(newLoad || form, truckAvailabilities, {});
-    setMatchesFound(results);
-    setLoadingMatches(false);
-    onCheckNewCargoForMatches(newLoad || form); // Flow C — notify watching carriers
+    setEscrowState("posted");
   }
 
   /* ── SUCCESS SCREEN ─────────────────────────────────────── */
@@ -400,42 +389,11 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
                 onClick={finalizePost}
                 style={{ flex:2,background:C.black,color:C.white,border:"none",borderRadius:8,padding:13,fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:font }}
               >
-                🚛 Post Cargo &amp; Find Trucks
+                🚛 Post Cargo
               </button>
             </div>
           </>}
 
-          {/* ── MATCHING TRUCKS ─────────────────────────────────── */}
-          {escrowState==="matching" && (
-            <div>
-              <div style={{ fontSize:20,fontWeight:800,color:C.black,marginBottom:4 }}>Matching Trucks</div>
-              <div style={{ fontSize:13,color:C.secondary,marginBottom:16 }}>
-                {loadingMatches ? "Scoring available trucks against your cargo…" : `${matchesFound.length} suitable truck${matchesFound.length!==1?"s":""} found.`}
-              </div>
-              {loadingMatches && (
-                <div style={{ textAlign:"center",padding:30,color:C.muted,fontSize:13 }}>🔎 Searching the network…</div>
-              )}
-              {!loadingMatches && matchesFound.length===0 && (
-                <div style={{ background:C.bg,borderRadius:10,padding:"24px 16px",textAlign:"center",marginBottom:16 }}>
-                  <div style={{ fontSize:28,marginBottom:8 }}>👀</div>
-                  <div style={{ fontSize:13,fontWeight:700,color:C.secondary }}>No declared trucks match yet</div>
-                  <div style={{ fontSize:12,color:C.muted,marginTop:2 }}>Your cargo stays open — transporters can still find and book it.</div>
-                </div>
-              )}
-              {!loadingMatches && matchesFound.map(m => (
-                <MatchCard
-                  key={m.id} match={m}
-                  truck={truckAvailabilities.find(t=>t.id===m.truckId)}
-                  cargo={createdLoad || form}
-                  primaryLabel="Request Truck"
-                  onPrimary={()=>onRequestMatch(m.id)}
-                />
-              ))}
-              <button onClick={()=>setEscrowState("posted")} style={{ width:"100%",background:C.black,color:C.white,border:"none",borderRadius:8,padding:14,fontSize:15,fontWeight:800,cursor:"pointer",fontFamily:font,marginTop:8 }}>
-                Continue →
-              </button>
-            </div>
-          )}
         </>}
       </div>
     </div>
@@ -828,18 +786,14 @@ function ShipperCommercePanel({ s, commerce }) {
   );
 }
 
-function DetailModal({ s, commerce, onClose, onConfirmDelivery = ()=>{}, escrowData = {}, bookingSlots = {}, onOpenDispute = ()=>{}, onSubmitRating = ()=>{}, truckAvailabilities = [], onFindMatchesForCargo = ()=>Promise.resolve([]) }) {
+function DetailModal({ s, commerce, onClose, onConfirmDelivery = ()=>{}, escrowData = {}, bookingSlots = {}, onOpenDispute = ()=>{}, onSubmitRating = ()=>{} }) {
   const [deliveryFlow,   setDeliveryFlow]   = useState(false);
   const [showDispute,    setShowDispute]    = useState(false);
   const [showRate,       setShowRate]       = useState(false);
   const [hasRated,       setHasRated]       = useState(false);
   const [showInvoice,    setShowInvoice]    = useState(false);
-  const [showChat,       setShowChat]       = useState(false);
-  const [showCarrierProfile, setShowCarrierProfile] = useState(false);
   const [showTracking,   setShowTracking]   = useState(false); // Feature 2
   // Matching engine — Nearby Trucks for cargo still awaiting a carrier
-  const [nearbyTrucks,   setNearbyTrucks]   = useState(null);
-  const [loadingNearby,  setLoadingNearby]  = useState(false);
 
   const escrow  = escrowData[s.id];
   const slots   = bookingSlots[s.id] || [];
@@ -851,13 +805,6 @@ function DetailModal({ s, commerce, onClose, onConfirmDelivery = ()=>{}, escrowD
   const isDisputed        = status === "Disputed";
   const canDispute        = (status === "In Transit" || status === "Arrived" || status === "Loading") && !isDisputed;
   const awaitingCarrier   = !s.driver || s.driver === "Matching transporter…";
-
-  async function findNearbyTrucks() {
-    setLoadingNearby(true);
-    const results = await onFindMatchesForCargo(s, truckAvailabilities, {});
-    setNearbyTrucks(results);
-    setLoadingNearby(false);
-  }
 
   // Escape key — must be before ALL conditional early returns to satisfy Rules of Hooks
   useEffect(() => {
@@ -877,12 +824,6 @@ function DetailModal({ s, commerce, onClose, onConfirmDelivery = ()=>{}, escrowD
   );
   if (showInvoice) return (
     <InvoiceModal s={s} onClose={()=>setShowInvoice(false)} />
-  );
-  if (showChat) return (
-    <ChatModal loadId={s.id} title={`${s.cargo} · ${s.id}`} currentUser="Shipper" onClose={()=>setShowChat(false)} />
-  );
-  if (showCarrierProfile) return (
-    <CarrierProfileModal carrier={s.driver} onClose={()=>setShowCarrierProfile(false)} />
   );
   if (showTracking) return (
     <ShipperTrackingModal s={s} onClose={()=>setShowTracking(false)} />
@@ -917,7 +858,7 @@ function DetailModal({ s, commerce, onClose, onConfirmDelivery = ()=>{}, escrowD
           <ProgressBar value={s.progress} />
           <div style={{ marginTop:8,fontSize:12,color:C.muted,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
             <span>📍 {s.ping} · {s.eta}</span>
-            {(status==="In Transit"||status==="Loading"||status==="Arrived")&&(
+            {(status==="Booked"||status==="In Transit"||status==="Loading"||status==="Arrived")&&(
               <button onClick={()=>setShowTracking(true)} style={{ background:C.blueBg,color:C.blue,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:font }}>
                 🗺 Track Live
               </button>
@@ -935,20 +876,7 @@ function DetailModal({ s, commerce, onClose, onConfirmDelivery = ()=>{}, escrowD
           ))}
         </div>
 
-        {/* Carrier profile + chat secondary actions */}
-        <div style={{ display:"flex",gap:8,marginBottom:16 }}>
-          {s.driver && s.driver !== "Matching transporter…" && (
-            <button onClick={()=>setShowCarrierProfile(true)} style={{ flex:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 8px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,color:C.secondary }}>
-              👤 View Transporter
-            </button>
-          )}
-          <button onClick={()=>setShowChat(true)} style={{ flex:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 8px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,color:C.secondary }}>
-            💬 Chat
-          </button>
-        </div>
-
         {/* 5D-3 — real backend negotiation; demo loads have no commercial record */}
-        {s.isDemo && <div style={{ marginBottom:16 }}><DemoBadge /></div>}
         {s.isBackend && (
           <ShipperCommercePanel s={s} commerce={commerce} />
         )}
@@ -971,30 +899,6 @@ function DetailModal({ s, commerce, onClose, onConfirmDelivery = ()=>{}, escrowD
               <div style={{ fontSize:11,color:C.muted }}>{s.driver} · {s.id}</div>
             </div>
             <button onClick={()=>setShowRate(true)} style={{ background:C.black,color:C.white,border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font }}>Rate Now</button>
-          </div>
-        )}
-
-        {/* Nearby Trucks — matching engine, cargo→truck direction */}
-        {awaitingCarrier && !isDisputed && status !== "Cancelled" && (
-          <div style={{ background:C.bg, border:`1px solid ${C.border}`, borderRadius:12, padding:"12px 14px", marginBottom:16 }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: nearbyTrucks ? 10 : 0 }}>
-              <div>
-                <div style={{ fontSize:13, fontWeight:800, color:C.black }}>Nearby Trucks</div>
-                <div style={{ fontSize:11, color:C.muted, marginTop:1 }}>{s.from} → {s.to}</div>
-              </div>
-              <button onClick={findNearbyTrucks} disabled={loadingNearby} style={{ background:C.black, color:C.white, border:"none", borderRadius:8, padding:"8px 12px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:font }}>
-                {loadingNearby ? "Searching…" : nearbyTrucks ? "↻ Refresh" : "🔍 Find Trucks"}
-              </button>
-            </div>
-            {nearbyTrucks && (
-              <NearbyList
-                entityType="truck"
-                items={nearbyTrucks.map(m => ({
-                  ...truckAvailabilities.find(t => t.id === m.truckId),
-                  distanceKm: m.originDistance,
-                }))}
-              />
-            )}
           </div>
         )}
 
@@ -1267,7 +1171,7 @@ function NotificationsPanel({ notifications, onClose, onMarkAllRead }) {
 }
 
 /* ── TABS ───────────────────────────────────────────────── */
-function Dashboard({ onPost, onDetail, allShipments = [] }) {
+function Dashboard({ onPost, onDetail, allShipments = [], identity = null }) {
   // Phase 3B: allShipments already comes fully merged (canonical load +
   // live booking + loadStatuses override) from getAllKnownLoads() +
   // toShipperShipmentView() in the root component — no local merge needed.
@@ -1276,16 +1180,15 @@ function Dashboard({ onPost, onDetail, allShipments = [] }) {
     <div style={{ padding:12 }}>
       <div style={{ background:C.black,borderRadius:12,padding:"18px 16px",marginBottom:12 }}>
         <div style={{ fontSize:10,color:"rgba(255,255,255,0.45)",fontWeight:700,letterSpacing:1,marginBottom:2 }}>LOGGED IN AS</div>
-        <div style={{ fontSize:22,fontWeight:800,color:C.white,letterSpacing:-0.3 }}>Bamburi Cement</div>
-        <div style={{ fontSize:13,color:C.green,marginTop:4,fontWeight:600 }}>★ 4.8 · Verified Shipper</div>
+        <div style={{ fontSize:22,fontWeight:800,color:C.white,letterSpacing:-0.3 }}>{identity?.company || identity?.name || "—"}</div>
+        <div style={{ fontSize:13,color:"rgba(255,255,255,0.6)",marginTop:4,fontWeight:600 }}>{identity?.company && identity?.name ? identity.name : "Shipper"}{identity?.phone ? ` · ${identity.phone}` : ""}</div>
       </div>
 
       <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12 }}>
-        {[["Active Loads","2","This week"],["Trips This Month","14","Completed"],["Total Spent","KSh 1.2M","2026 YTD"],["Avg Rating","4.8 ★","Given to drivers"]].map(([l,v,s])=>(
+        {[["Active Loads",String(active.length)],["Delivered",String(allShipments.filter(x=>x.status==="Delivered"||x.status==="Paid Out").length)]].map(([l,v])=>(
           <div key={l} style={{ ...card,padding:"14px 14px" }}>
             <div style={{ fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4 }}>{l}</div>
             <div style={{ fontSize:22,fontWeight:800,color:C.black,letterSpacing:-0.3 }}>{v}</div>
-            <div style={{ fontSize:11,color:C.muted,marginTop:2 }}>{s}</div>
           </div>
         ))}
       </div>
@@ -1295,6 +1198,12 @@ function Dashboard({ onPost, onDetail, allShipments = [] }) {
       </button>
 
       <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",marginBottom:8 }}>Active Shipments</div>
+      {active.length === 0 && (
+        <div style={{ ...card,padding:"28px 18px",textAlign:"center" }}>
+          <div style={{ fontSize:15,fontWeight:700,color:C.secondary,marginBottom:4 }}>No cargo posted yet</div>
+          <div style={{ fontSize:13,color:C.muted }}>Post your first load to start finding transporters.</div>
+        </div>
+      )}
       {active.map(s=>(
         <div key={s.id} onClick={()=>onDetail(s)} style={{ ...card,padding:16,marginBottom:8,cursor:"pointer" }}>
           <div style={{ display:"flex",justifyContent:"space-between",marginBottom:8 }}>
@@ -1424,117 +1333,6 @@ function History({ allShipments = [] }) {
   );
 }
 
-/* ── IN-APP CHAT (SHIPPER SIDE) ─────────────────────────── */
-const chatKey = id => `behari_chat_${id}`;
-
-function ChatModal({ loadId, title, currentUser, onClose }) {
-  const [msgs, setMsgs] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(chatKey(loadId)) || "[]"); } catch { return []; }
-  });
-  const [text,    setText]    = useState("");
-  const bottomRef = useRef(null);
-
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [msgs]);
-
-  function send() {
-    if (!text.trim()) return;
-    const now  = new Date().toLocaleTimeString("en-KE",{hour:"2-digit",minute:"2-digit"});
-    const next = [...msgs, { from:currentUser, text:text.trim(), time:now }];
-    setMsgs(next);
-    localStorage.setItem(chatKey(loadId), JSON.stringify(next));
-    setText("");
-  }
-
-  return (
-    <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:600,fontFamily:font }}>
-      <div style={{ background:C.white,borderRadius:"16px 16px 0 0",width:"100%",maxWidth:480,height:"72vh",display:"flex",flexDirection:"column" }}>
-        <div style={{ padding:"12px 16px 10px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0 }}>
-          <div>
-            <div style={{ fontSize:15,fontWeight:800,color:C.black }}>💬 Load Chat</div>
-            <div style={{ fontSize:11,color:C.muted,marginTop:1 }}>{title}</div>
-          </div>
-          <button onClick={onClose} style={{ background:C.bg,border:"none",borderRadius:"50%",width:32,height:32,cursor:"pointer",fontSize:16,color:C.secondary,display:"flex",alignItems:"center",justifyContent:"center" }}>✕</button>
-        </div>
-        <div style={{ flex:1,overflowY:"auto",padding:"12px 16px" }}>
-          {msgs.length === 0 && <div style={{ textAlign:"center",color:C.muted,fontSize:13,marginTop:48 }}>No messages yet — start the conversation!</div>}
-          {msgs.map((m,i) => {
-            const mine = m.from === currentUser;
-            return (
-              <div key={i} style={{ display:"flex",justifyContent:mine?"flex-end":"flex-start",marginBottom:10 }}>
-                <div style={{ maxWidth:"76%",background:mine?C.black:C.bg,borderRadius:mine?"12px 12px 2px 12px":"12px 12px 12px 2px",padding:"10px 13px" }}>
-                  <div style={{ fontSize:10,color:mine?"rgba(255,255,255,0.5)":C.muted,marginBottom:3,fontWeight:600 }}>{m.from} · {m.time}</div>
-                  <div style={{ fontSize:13,color:mine?C.white:C.black,fontWeight:500 }}>{m.text}</div>
-                </div>
-              </div>
-            );
-          })}
-          <div ref={bottomRef} />
-        </div>
-        <div style={{ padding:"10px 12px",borderTop:`1px solid ${C.border}`,display:"flex",gap:8,flexShrink:0 }}>
-          <input
-            value={text} onChange={e=>setText(e.target.value)}
-            onKeyDown={e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); send(); }}}
-            placeholder="Type a message…"
-            style={{ flex:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 14px",fontSize:13,fontFamily:font,outline:"none",color:C.black }}
-          />
-          <button onClick={send} disabled={!text.trim()} style={{ background:text.trim()?C.black:C.border,color:text.trim()?C.white:C.muted,border:"none",borderRadius:8,padding:"10px 16px",fontSize:13,fontWeight:700,cursor:text.trim()?"pointer":"not-allowed",fontFamily:font }}>
-            Send
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── CARRIER PUBLIC PROFILE (SHIPPER VIEW) ───────────────── */
-function CarrierProfileModal({ carrier, onClose }) {
-  const name  = carrier && carrier !== "Matching transporter…" ? carrier : "James K. Mwangi";
-  const KYC   = ["National ID","Licence CE","GIT Insurance","NTSA Inspection","Truck Logbook","KRA PIN"];
-  return (
-    <div style={{ position:"fixed",inset:0,zIndex:600,display:"flex",alignItems:"flex-end",justifyContent:"center",fontFamily:font }}>
-      <div onClick={onClose} style={{ position:"absolute",inset:0,background:"rgba(0,0,0,0.55)",backdropFilter:"blur(4px)" }} />
-      <div style={{ position:"relative",background:C.white,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:480,maxHeight:"88vh",overflowY:"auto",padding:"8px 20px 40px" }} onClick={e=>e.stopPropagation()}>
-        <div style={{ width:36,height:4,background:C.border,borderRadius:2,margin:"12px auto 20px" }} />
-        <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",marginBottom:12 }}>Transporter Profile</div>
-
-        <div style={{ background:C.black,borderRadius:14,padding:"20px 18px",marginBottom:20,display:"flex",gap:16,alignItems:"center" }}>
-          <div style={{ width:60,height:60,borderRadius:"50%",background:C.green,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:800,color:C.black,flexShrink:0 }}>
-            {name.split(" ").map(w=>w[0]).slice(0,2).join("")}
-          </div>
-          <div style={{ flex:1 }}>
-            <div style={{ fontSize:17,fontWeight:800,color:C.white,marginBottom:2 }}>{name}</div>
-            <div style={{ fontSize:13,color:"rgba(255,255,255,0.6)" }}>Nairobi · 10+ years experience</div>
-            <div style={{ display:"flex",alignItems:"center",gap:8,marginTop:6 }}>
-              <span style={{ background:C.green,color:C.black,fontSize:11,fontWeight:800,borderRadius:100,padding:"3px 10px" }}>4.9 ★</span>
-              <span style={{ fontSize:12,color:"rgba(255,255,255,0.5)" }}>148 trips · 99% on-time</span>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:20 }}>
-          {[["148","Trips"],["4.9 ★","Rating"],["99%","On-time"]].map(([v,l]) => (
-            <div key={l} style={{ ...card,padding:"12px",textAlign:"center" }}>
-              <div style={{ fontSize:18,fontWeight:800,color:C.black }}>{v}</div>
-              <div style={{ fontSize:11,color:C.muted,fontWeight:600,marginTop:2 }}>{l}</div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ fontSize:11,fontWeight:700,color:C.muted,letterSpacing:0.8,textTransform:"uppercase",marginBottom:8 }}>KYC Verified Documents</div>
-        <div style={{ display:"flex",flexWrap:"wrap",gap:6,marginBottom:24 }}>
-          {KYC.map(d => (
-            <span key={d} style={{ background:C.greenBg,color:C.green,border:`1px solid ${C.green}`,borderRadius:100,padding:"5px 12px",fontSize:11,fontWeight:700 }}>
-              ✓ {d}
-            </span>
-          ))}
-        </div>
-
-        <button onClick={onClose} style={{ width:"100%",background:C.black,color:C.white,border:"none",borderRadius:10,padding:14,fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:font }}>Close</button>
-      </div>
-    </div>
-  );
-}
-
 /* ── SPEND ANALYTICS ─────────────────────────────────────── */
 function Analytics({ allShipments = [] }) {
   const [budgetCap, setBudgetCap] = useState(() => {
@@ -1557,20 +1355,12 @@ function Analytics({ allShipments = [] }) {
   allLoads.forEach(l => { if (l.from && l.to) { const k = `${l.from.split(",")[0]} → ${l.to.split(",")[0]}`; byCorridor[k] = (byCorridor[k]||0) + l.pay; }});
   const corridorEntries = Object.entries(byCorridor).sort((a,b)=>b[1]-a[1]).slice(0,5);
 
-  // Monthly spend (simple mock weeks)
-  const months = [
-    {l:"Jan",v:148000},{l:"Feb",v:195000},{l:"Mar",v:87000},
-    {l:"Apr",v:213000},{l:"May",v:totalSpend > 0 ? Math.min(totalSpend,260000) : 176000},
-  ];
-  const maxM = Math.max(...months.map(m=>m.v),1);
-
   return (
     <div style={{ padding:12 }}>
       {/* Hero */}
       <div style={{ background:C.black,borderRadius:12,padding:"20px 16px",marginBottom:12 }}>
         <div style={{ fontSize:11,color:"rgba(255,255,255,0.45)",fontWeight:700,letterSpacing:1,marginBottom:4 }}>2026 TOTAL SPEND</div>
         <div style={{ fontSize:36,fontWeight:800,color:C.white,letterSpacing:-1 }}>KSh {totalSpend.toLocaleString()}</div>
-        <div style={{ fontSize:13,color:C.green,marginTop:6,fontWeight:600 }}>↑ 12% compared to 2025</div>
       </div>
 
       {/* Budget Cap alert (Feature 17) */}
@@ -1600,20 +1390,6 @@ function Analytics({ allShipments = [] }) {
             <div style={{ fontSize:20,fontWeight:800,color:C.black }}>{v}</div>
           </div>
         ))}
-      </div>
-
-      {/* Monthly bar chart */}
-      <div style={{ ...card,padding:16,marginBottom:16 }}>
-        <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",marginBottom:14 }}>Monthly Spend (KSh)</div>
-        <div style={{ display:"flex",alignItems:"flex-end",gap:10,height:80 }}>
-          {months.map((m,i) => (
-            <div key={m.l} style={{ flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4 }}>
-              <div style={{ fontSize:10,color:C.muted }}>{m.v>0?`${(m.v/1000).toFixed(0)}k`:""}</div>
-              <div style={{ width:"100%",height:`${Math.max((m.v/maxM)*64,3)}px`,background:i===months.length-1?C.green:C.border,borderRadius:"3px 3px 0 0",transition:"height 0.3s" }} />
-              <div style={{ fontSize:11,fontWeight:i===months.length-1?700:500,color:i===months.length-1?C.black:C.muted }}>{m.l}</div>
-            </div>
-          ))}
-        </div>
       </div>
 
       {/* By cargo type */}
@@ -1835,122 +1611,24 @@ function ShipperDisputeModal({ shipment, onClose, onOpenDispute }) {
   );
 }
 
-/* ── SHIPPER LIVE TRACKING MAP (Feature 2) ───────────────── */
+/* ── SHIPPER LIVE TRACKING — real backend GPS only; no simulated position ── */
 function ShipperTrackingModal({ s, onClose }) {
-  const mapRef  = useRef(null);
-  const leafRef = useRef(null);
-  const live = useLiveTripByLoadId(s.id); // Phase 4G — real backend GPS, polled every ~7s
-  // Simulate progress based on shipment status
-  const pctMap = { "In Transit":55,"Arrived":85,"Delivery Confirmed":97,"Loading":20,"Accepted":10 };
-  const pct = pctMap[s.status] || 50;
-  const ROUTES = {
-    default: [[-1.2864,36.8172],[-2.5,37.5],[-3.5,38.5],[-4.0435,39.6682]],
-  };
-  const route = ROUTES.default;
-  const idx = Math.floor((pct/100) * (route.length-1));
-  const truckPos = route[Math.min(idx, route.length-1)];
-
-  // Phase 5C-2: Google map with the real road route when a key is configured and
-  // the load has coordinates; otherwise the original Leaflet simulation.
-  const [gmFailed, setGmFailed] = useState(false);
-  const roadPath = s.routePolyline ? decodePolyline(s.routePolyline) : null;
-  const pk = s.pickup, dl = s.delivery;
-  const hasGeo = Number.isFinite(pk?.lat) && Number.isFinite(dl?.lat);
-  const useGoogle = hasMapsKey() && hasGeo && !gmFailed;
-  const liveLoc = live.location && Number.isFinite(live.location.lat) ? live.location : null;
-  let simPos = null;
-  if (hasGeo) {
-    if (roadPath && roadPath.length > 1) simPos = roadPath[Math.min(roadPath.length - 1, Math.floor((pct / 100) * (roadPath.length - 1)))];
-    else simPos = { lat: pk.lat + (dl.lat - pk.lat) * pct / 100, lng: pk.lng + (dl.lng - pk.lng) * pct / 100 };
+  const live = useLiveTripByLoadId(s.id);
+  if (live.trip) {
+    return <TripTrackingModal trip={live.trip} role="shipper" onClose={onClose} />;
   }
-  const truckMarker = liveLoc
-    ? { id: "truck", lat: liveLoc.lat, lng: liveLoc.lng, label: "🚛 Live", color: "#06C167" }
-    : simPos ? { id: "truck", lat: simPos.lat, lng: simPos.lng, label: `🚛 ${pct}% (simulated)`, color: "#06C167" } : null;
-
-  useEffect(() => {
-    if (useGoogle) return;
-    if (!document.getElementById("leaflet-css")) {
-      const link = document.createElement("link");
-      link.id = "leaflet-css"; link.rel = "stylesheet";
-      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-      document.head.appendChild(link);
-    }
-    function initMap(L) {
-      if (leafRef.current) return;
-      const map = L.map(mapRef.current, { center:truckPos, zoom:7, zoomControl:false, attributionControl:false });
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { maxZoom:19 }).addTo(map);
-      L.polyline(route, { color:"#06C167", weight:3, opacity:0.7 }).addTo(map);
-      // Origin + destination markers
-      const dotIcon = (color) => L.divIcon({ className:"", iconSize:[10,10], iconAnchor:[5,5], html:`<div style="width:10px;height:10px;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,0.5)"></div>` });
-      L.marker(route[0], { icon:dotIcon("#06C167") }).addTo(map).bindTooltip(`<b>Pickup: ${s.from}</b>`, { direction:"top" });
-      L.marker(route[route.length-1], { icon:dotIcon("#276EF1") }).addTo(map).bindTooltip(`<b>Destination: ${s.to}</b>`, { direction:"top" });
-      // Truck marker
-      const truckIcon = L.divIcon({ className:"", iconSize:[28,28], iconAnchor:[14,14], html:`<div style="width:26px;height:26px;background:#06C167;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 0 12px #06C167aa;border:2px solid white">🚛</div>` });
-      L.marker(truckPos, { icon:truckIcon }).addTo(map).bindTooltip(`<b>${s.driver}</b> · ${pct}%`, { permanent:true, direction:"top", offset:[0,-16] });
-      leafRef.current = map;
-    }
-    if (window.L) initMap(window.L);
-    else {
-      const sc = document.createElement("script");
-      sc.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-      sc.onload = () => initMap(window.L);
-      document.head.appendChild(sc);
-    }
-    return () => { if (leafRef.current) { leafRef.current.remove(); leafRef.current = null; } };
-  }, [useGoogle]);
-
   return (
-    <div style={{ position:"fixed",inset:0,zIndex:500,display:"flex",alignItems:"flex-end",justifyContent:"center",fontFamily:font }}>
-      <div onClick={onClose} style={{ position:"absolute",inset:0,background:"rgba(0,0,0,0.65)",backdropFilter:"blur(4px)" }} />
-      <div style={{ position:"relative",background:C.white,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:520,maxHeight:"88vh",overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
-        <div style={{ width:36,height:4,background:C.border,borderRadius:2,margin:"12px auto 0" }} />
-        <div style={{ padding:"14px 18px 0",display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12 }}>
-          <div>
-            <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase" }}>Live Tracking · {s.id}</div>
-            <div style={{ fontSize:18,fontWeight:800,color:C.black,marginTop:2 }}>{s.cargo}</div>
-            <div style={{ fontSize:13,color:C.secondary }}>{s.from} → {s.to}</div>
-          </div>
-          <div style={{ textAlign:"right" }}>
-            <div style={{ fontSize:11,color:C.muted,fontWeight:700,textTransform:"uppercase" }}>Progress</div>
-            <div style={{ fontSize:20,fontWeight:800,color:C.black }}>{pct}%</div>
-            <div style={{ fontSize:11,color:C.green,fontWeight:600 }}>{s.status}</div>
-          </div>
+    <div style={{ position:"fixed",inset:0,zIndex:500,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+      <div onClick={onClose} style={{ position:"absolute",inset:0,background:"rgba(0,0,0,0.65)" }} />
+      <div style={{ position:"relative",background:C.white,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:520,padding:"20px 18px 32px" }}>
+        <div style={{ display:"flex",justifyContent:"space-between",marginBottom:10 }}>
+          <div style={{ fontSize:16,fontWeight:800,color:C.black }}>Live tracking</div>
+          <button onClick={onClose} aria-label="Close" style={{ background:"none",border:"none",fontSize:22,cursor:"pointer",color:C.muted }}>×</button>
         </div>
-        <div style={{ padding:"0 18px", marginBottom:14 }}>
-          <LiveTrackingPanel {...live} truckPlate={s.plate} />
+        <div data-testid="tracking-unavailable" style={{ fontSize:13,fontWeight:700,color:C.secondary }}>
+          {live.loading ? "Checking live tracking…" : "Live location unavailable."}
         </div>
-        <div style={{ padding:"0 18px 8px", fontSize:11, color:C.muted, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase" }}>
-          {useGoogle ? (roadPath ? "Road route" : "Route (straight line — road route unavailable)") : "Simulated route"}
-        </div>
-        <div style={{ margin:"0 18px 14px",borderRadius:12,overflow:"hidden",height:220,background:"#17192C" }}>
-          {useGoogle ? (
-            <GoogleMap
-              height={220}
-              path={roadPath || [{ lat: pk.lat, lng: pk.lng }, { lat: dl.lat, lng: dl.lng }]}
-              markers={[
-                { id: "pickup",   lat: pk.lat, lng: pk.lng, label: `Pickup: ${s.from}`,  color: "#06C167" },
-                { id: "delivery", lat: dl.lat, lng: dl.lng, label: `Drop: ${s.to}`,      color: "#276EF1" },
-                ...(truckMarker ? [truckMarker] : []),
-              ]}
-              onUnavailable={() => setGmFailed(true)}
-            />
-          ) : (
-            <div ref={mapRef} style={{ width:"100%",height:"100%" }} />
-          )}
-        </div>
-        <div style={{ display:"flex",gap:8,padding:"0 18px",marginBottom:14 }}>
-          {[["Driver",s.driver],["Truck",s.plate||"—"],["ETA",s.eta||"TBD"]].map(([l,v])=>(
-            <div key={l} style={{ flex:1,background:C.bg,borderRadius:10,padding:"10px 12px",textAlign:"center" }}>
-              <div style={{ fontSize:10,color:C.muted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:3 }}>{l}</div>
-              <div style={{ fontSize:13,fontWeight:800,color:C.black,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{v}</div>
-            </div>
-          ))}
-        </div>
-        <div style={{ padding:"0 18px 32px" }}>
-          <div style={{ background:C.amberBg,borderRadius:8,padding:"10px 14px",fontSize:12,color:C.amber,fontWeight:600 }}>
-            📱 Tracking updates every 30 minutes. Last ping: {s.ping || "—"}
-          </div>
-        </div>
+        {!live.loading && <div style={{ fontSize:12,color:C.muted,marginTop:6 }}>Tracking starts once a trip has been created and the driver is reporting GPS.</div>}
       </div>
     </div>
   );
@@ -1995,8 +1673,6 @@ export default function BehariShipper({ onPostLoad = ()=>{}, postedLoads = [], n
   onShowLegal = ()=>{},
   // Dark mode (lifted to App.jsx — uniform across all portals)
   darkMode = false, toggleDark = ()=>{},
-  // Matching engine (Truck ↔ Cargo) — see hooks/useMatching.js
-  truckAvailabilities = [], onFindMatchesForCargo = ()=>Promise.resolve([]), onRequestMatch = ()=>{}, onCheckNewCargoForMatches = ()=>{},
 }) {
   const [tab, setTab]               = useState(0);
   const [posting, setPosting]       = useState(false);
@@ -2031,14 +1707,12 @@ export default function BehariShipper({ onPostLoad = ()=>{}, postedLoads = [], n
     }
     seenNotifs.current = ids;
   }, [commerce.notifications, commerce.ready]);
-  const demoShipments = getAllKnownLoads().filter(l => !l.backendLoadId).map(l => ({ ...toShipperShipmentView(l, notifications), isDemo:true }));
-  // Seeded backend fixtures with no posted price (e.g. KE-2039) mirror a local demo load; show only the demo copy.
   const backendShipments = commerce.loads.filter(v => v.price != null).map(v => {
     const booking = commerce.bookings.find(b => b.loadId === v.id);
     const status = v.status === "Open" ? "Escrow Held" : v.status;
     const road = v.distanceSource === "ROAD" && v.distanceMeters > 0;
     return {
-      id:v.id, backendLoadId:v.id, isBackend:true, isDemo:false, status,
+      id:v.id, backendLoadId:v.id, isBackend:true, status,
       cargo:v.cargo, from:v.origin, to:v.destination, route:`${v.origin} → ${v.destination}`,
       weight:v.weight ?? "—", truck:v.truckType || "Any Available",
       pay:v.price ?? 0, agreedAmount: booking?.agreedAmount ?? null, dist:road ? metersToKm(v.distanceMeters) : 0, distSource:road ? "route" : "unresolved",
@@ -2049,7 +1723,7 @@ export default function BehariShipper({ onPostLoad = ()=>{}, postedLoads = [], n
       createdAt: v.createdAt ? Date.parse(v.createdAt) : 0,
     };
   }).sort((a,b) => b.createdAt - a.createdAt);
-  const allShipments = [...backendShipments, ...demoShipments];
+  const allShipments = backendShipments;
 
   function openNotification(n) {
     const offer = commerce.offers.find(o => o.id === n.relatedEntityId);
@@ -2092,12 +1766,20 @@ export default function BehariShipper({ onPostLoad = ()=>{}, postedLoads = [], n
               + Post Cargo
             </button>
             {/* Avatar — tap to sign out, mirrors carrier portal */}
-            <div onClick={onLogout} title="Sign out" style={{ width:34,height:34,borderRadius:"50%",background:C.black,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:C.white,cursor:"pointer",flexShrink:0 }}>{(commerce.identity?.name || "BC").split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase()}</div>
+            <div onClick={onLogout} title="Sign out" style={{ width:34,height:34,borderRadius:"50%",background:C.black,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:C.white,cursor:"pointer",flexShrink:0 }}>{(commerce.identity?.name || "—").split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase()}</div>
           </div>
         </div>
       </div>
 
-      {tab===0 && <Dashboard onPost={()=>setPosting(true)} onDetail={setDetail} allShipments={allShipments} />}
+      {tab===0 && <Dashboard onPost={()=>setPosting(true)} onDetail={setDetail} allShipments={allShipments} identity={commerce.identity} />}
+      {tab===0 && (
+        <div style={{ padding:"0 12px 12px" }}>
+          <NotLive icon="🧭" title="Nearby trucks & matching" body="Behari will automatically match your cargo with available trucks along their routes." />
+          <NotLive compact icon="💬" title="Chat with transporter" />
+          <NotLive compact icon="⭐" title="Transporter profiles & ratings" />
+          <NotLive compact icon="🛡️" title="Cargo insurance" />
+        </div>
+      )}
       {tab===1 && <Shipments onDetail={setDetail} allShipments={allShipments} />}
       {tab===2 && <History allShipments={allShipments} />}
       {tab===3 && <Analytics allShipments={allShipments} />}
@@ -2123,8 +1805,8 @@ export default function BehariShipper({ onPostLoad = ()=>{}, postedLoads = [], n
         <span style={{ fontSize:11,color:C.muted }}>© 2026 Behari Freight Ltd</span>
       </div>
 
-      {posting && <PostModal onClose={()=>setPosting(false)} onPostLoad={onPostLoad} truckAvailabilities={truckAvailabilities} onFindMatchesForCargo={onFindMatchesForCargo} onRequestMatch={onRequestMatch} onCheckNewCargoForMatches={onCheckNewCargoForMatches} />}
-      {liveDetail && <DetailModal s={liveDetail} commerce={commerce} onClose={()=>setDetail(null)} onConfirmDelivery={onConfirmDelivery} escrowData={escrowData} bookingSlots={bookingSlots} onOpenDispute={onOpenDispute} onSubmitRating={onSubmitRating} truckAvailabilities={truckAvailabilities} onFindMatchesForCargo={onFindMatchesForCargo} />}
+      {posting && <PostModal onClose={()=>setPosting(false)} onPostLoad={onPostLoad} />}
+      {liveDetail && <DetailModal s={liveDetail} commerce={commerce} onClose={()=>setDetail(null)} onConfirmDelivery={onConfirmDelivery} escrowData={escrowData} bookingSlots={bookingSlots} onOpenDispute={onOpenDispute} onSubmitRating={onSubmitRating} />}
       {/* Feature 5: SMS Alert Toast */}
       {toast && <Toast message={toast} onDone={()=>setToast(null)} />}
     </div>

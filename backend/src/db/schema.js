@@ -54,6 +54,8 @@ export const drivers = sqliteTable("drivers", {
   licenseNumber:   text("license_number"),
   assignedTruckId: text("assigned_truck_id"),
   status:          text("status").notNull(),
+  // 5P-3 — a driver belongs to exactly one fleet owner, independent of any truck pairing.
+  fleetOwnerId:    text("fleet_owner_id"),
 });
 
 export const trips = sqliteTable("trips", {
@@ -117,6 +119,10 @@ export const users = sqliteTable("users", {
   name:         text("name").notNull(),
   driverId:     text("driver_id"),      // set only for role:"driver"
   fleetOwnerId: text("fleet_owner_id"), // set only for role:"fleet_owner" — Phase 4H needs this to resolve "which trucks can this transporter assign to a booking"
+  // 5P-1 — dev auth mode is phone+PIN with NO phone verification. This stays 0 until a real SMS
+  // provider verifies the number; /api/me reports it so no UI can pretend otherwise.
+  phoneVerified: integer("phone_verified").notNull().default(0),
+  createdAt:    text("created_at"),
 }, (table) => ({
   phoneRoleUnique: unique().on(table.phone, table.role),
 }));
@@ -194,6 +200,8 @@ export const loads = sqliteTable("loads", {
   routePolyline:    text("route_polyline"),
   routeDurationSec: integer("route_duration_sec"),
   distanceSource:   text("distance_source"), // "ROAD" or null
+  // Phase 5E-1 — the authorized loading site this load is picked up at; null until an admin links one.
+  pickupSiteId:     text("pickup_site_id"),
   status:      text("status").notNull(), // "Open" | "Booked" | "Cancelled"
   createdAt:   text("created_at").notNull(),
   updatedAt:   text("updated_at").notNull(),
@@ -431,4 +439,88 @@ export const adjustments = sqliteTable("adjustments", {
     .on(table.bookingId, table.sourceRef)
     .where(sql`${table.sourceRef} is not null`),
   bookingIdIdx: index("adjustments_booking_id_idx").on(table.bookingId),
+}));
+
+
+/**
+ * Phase 5E-1 — gate / loading evidence domain.
+ *
+ * loading_sites is the authorization identity of a physical pickup place
+ * (never a free-text name). loading_agent_sites says which agent may act at
+ * which site. gate_tokens are single-purpose, single-use QR secrets (only the
+ * SHA-256 hash is stored). gate_events is the append-only evidence ledger that
+ * 5G will later consume; nothing here touches payments, escrows or payouts.
+ */
+export const loadingSites = sqliteTable("loading_sites", {
+  id:           text("id").primaryKey(),
+  name:         text("name").notNull(),
+  lat:          real("lat").notNull(),
+  lng:          real("lng").notNull(),
+  radiusMeters: integer("radius_meters").notNull(),
+  active:       integer("active").notNull().default(1),
+  createdAt:    text("created_at").notNull(),
+  updatedAt:    text("updated_at").notNull(),
+}, (table) => ({
+  radiusPositive: check("loading_sites_radius_positive", sql`${table.radiusMeters} > 0`),
+  latRange: check("loading_sites_lat_range", sql`${table.lat} between -90 and 90`),
+  lngRange: check("loading_sites_lng_range", sql`${table.lng} between -180 and 180`),
+  activeBool: check("loading_sites_active_bool", sql`${table.active} in (0, 1)`),
+}));
+
+export const loadingAgentSites = sqliteTable("loading_agent_sites", {
+  agentUserId: text("agent_user_id").notNull(),
+  siteId:      text("site_id").notNull(),
+  createdById: text("created_by_id"),
+  createdAt:   text("created_at").notNull(),
+}, (table) => ({
+  pk: uniqueIndex("loading_agent_sites_pk").on(table.agentUserId, table.siteId),
+  siteIdx: index("loading_agent_sites_site_idx").on(table.siteId),
+}));
+
+export const gateTokens = sqliteTable("gate_tokens", {
+  id:               text("id").primaryKey(),
+  tripId:           text("trip_id").notNull(),
+  purpose:          text("purpose").notNull(), // GATE_IN | LOADING_START | LOADING_COMPLETE
+  tokenHash:        text("token_hash").notNull(),
+  issuedToUserId:   text("issued_to_user_id").notNull(),
+  issuedAt:         text("issued_at").notNull(),
+  expiresAt:        text("expires_at").notNull(),
+  consumedAt:       text("consumed_at"),
+  consumedByUserId: text("consumed_by_user_id"),
+  revokedAt:        text("revoked_at"),
+  revokeReason:     text("revoke_reason"),
+}, (table) => ({
+  purposeValid: check("gate_tokens_purpose_valid", sql`${table.purpose} in ('GATE_IN', 'LOADING_START', 'LOADING_COMPLETE')`),
+  hashUnique: uniqueIndex("gate_tokens_hash_unique").on(table.tokenHash),
+  oneActivePerTrip: uniqueIndex("gate_tokens_one_active_per_trip")
+    .on(table.tripId)
+    .where(sql`${table.consumedAt} is null and ${table.revokedAt} is null`),
+  tripIdx: index("gate_tokens_trip_idx").on(table.tripId),
+}));
+
+export const gateEvents = sqliteTable("gate_events", {
+  id:                  text("id").primaryKey(),
+  tripId:              text("trip_id").notNull(),
+  bookingId:           text("booking_id").notNull(),
+  truckId:             text("truck_id").notNull(),
+  driverId:            text("driver_id").notNull(),
+  siteId:              text("site_id").notNull(),
+  agentUserId:         text("agent_user_id").notNull(),
+  eventType:           text("event_type").notNull(), // GATE_IN | LOADING_STARTED | LOADING_COMPLETED
+  tokenId:             text("token_id").notNull(),
+  tokenPurpose:        text("token_purpose").notNull(),
+  tripStatusBefore:    text("trip_status_before").notNull(),
+  tripStatusAfter:     text("trip_status_after").notNull(),
+  bookingFunded:       integer("booking_funded").notNull(),
+  driverLocationAvailable: integer("driver_location_available").notNull(),
+  driverDistanceFromSiteMeters: real("driver_distance_from_site_meters"),
+  insideSiteGeofence:  integer("inside_site_geofence"), // null = could not be evaluated (never a pass)
+  locationAgeSeconds:  integer("location_age_seconds"),
+  snapshot:            text("snapshot").notNull(), // JSON of the facts behind the decision
+  createdAt:           text("created_at").notNull(),
+}, (table) => ({
+  typeValid: check("gate_events_type_valid", sql`${table.eventType} in ('GATE_IN', 'LOADING_STARTED', 'LOADING_COMPLETED')`),
+  oneTypePerTrip: uniqueIndex("gate_events_one_type_per_trip").on(table.tripId, table.eventType),
+  oneEventPerToken: uniqueIndex("gate_events_token_unique").on(table.tokenId),
+  tripIdx: index("gate_events_trip_idx").on(table.tripId),
 }));

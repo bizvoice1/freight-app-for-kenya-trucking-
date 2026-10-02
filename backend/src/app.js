@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import { randomUUID } from "node:crypto";
 import { sqlite } from "./db/client.js";
-import authRoutes from "./routes/auth.js";
+import authRoutes, { meRouter } from "./routes/auth.js";
 import tripRoutes from "./routes/trips.js";
 import loadRoutes from "./routes/loads.js";
 import offerRoutes from "./routes/offers.js";
@@ -15,6 +15,7 @@ import darajaWebhookRoutes from "./routes/darajaWebhooks.js";
 import notificationRoutes from "./routes/notifications.js";
 import geoRoutes from "./routes/geo.js";
 import adjustmentRoutes from "./routes/adjustments.js";
+import gateRoutes from "./routes/gate.js";
 
 export const app = express();
 
@@ -77,6 +78,7 @@ app.get("/ready", (_req, res) => {
 app.use("/api", darajaWebhookRoutes); // POST /api/payments/callback/stk, POST /api/payouts/callback/b2c
 
 app.use("/api/auth", authRoutes);
+app.use("/api/me", meRouter);
 app.use("/api/trips", tripRoutes);
 app.use("/api/loads", loadRoutes);
 app.use("/api/offers", offerRoutes);
@@ -88,6 +90,7 @@ app.use("/api/escrows", escrowRoutes);
 app.use("/api/payouts", payoutRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/geo", geoRoutes);
+app.use("/api", gateRoutes); // 5E-2: /api/trips/:id/gate*, /api/gate/*, /api/loading-sites*, PUT /api/loads/:id/pickup-site
 
 /**
  * Phase 4M — every async route handler is now wrapped in asyncHandler

@@ -3,6 +3,7 @@
 // -> recipient mapping agreed for 4L's narrow scope, plus the read/unread
 // endpoints and the "a notification belongs to exactly its recipient" rule.
 import Database from "better-sqlite3";
+import { driveSteps } from "./gate-helper.mjs";
 import { NBO_NKU } from "./fixtures.mjs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -86,10 +87,7 @@ async function createBookedTrip(price) {
 }
 
 async function driveToDelivered(tripId) {
-  for (const status of ["Dispatched", "At Pickup", "Loading", "In Transit", "At Delivery"]) {
-    const r = await api(peterDriver.token, "POST", `/api/trips/${tripId}/status`, { status });
-    assert(r.status === 200, `driver step ${status} failed: ${JSON.stringify(r.json)}`);
-  }
+  await driveSteps({ tripId, driverToken: peterDriver.token, statuses: ["Dispatched", "At Pickup", "Loading", "In Transit", "At Delivery"] });
   const r = await api(shipper.token, "POST", `/api/trips/${tripId}/status`, { status: "Delivered" });
   assert(r.status === 200, `confirm Delivered failed: ${JSON.stringify(r.json)}`);
 }
@@ -146,8 +144,15 @@ async function main() {
     const shipperTripNotifs = await notificationsFor(shipper.token, { type: "trip_status" });
     const jamesTripNotifs = await notificationsFor(james.token, { type: "trip_status" });
     const thisTrip = n => n.relatedEntityId === trip.id;
-    assert(shipperTripNotifs.filter(thisTrip).length === 6, `expected 6 trip_status notifications for the shipper, got ${shipperTripNotifs.filter(thisTrip).length}`);
-    assert(jamesTripNotifs.filter(thisTrip).length === 6, `expected 6 trip_status notifications for the transporter, got ${jamesTripNotifs.filter(thisTrip).length}`);
+    // Loading / In Transit are gate-owned (5E-2): they notify via gate_* types, not trip_status.
+    assert(shipperTripNotifs.filter(thisTrip).length === 4, `expected 4 trip_status notifications for the shipper, got ${shipperTripNotifs.filter(thisTrip).length}`);
+    assert(jamesTripNotifs.filter(thisTrip).length === 4, `expected 4 trip_status notifications for the transporter, got ${jamesTripNotifs.filter(thisTrip).length}`);
+    for (const [who, label] of [[shipper, "shipper"], [james, "transporter"]]) {
+      for (const type of ["gate_in", "loading_started", "loading_completed"]) {
+        const ns = (await notificationsFor(who.token, { type })).filter(thisTrip);
+        assert(ns.length === 1, `expected 1 ${type} notification for the ${label}, got ${ns.length}`);
+      }
+    }
 
     await test("  -> Delivered also notified the transporter + admin of release_pending", async () => {
       const jamesRelease = await notificationsFor(james.token, { type: "release_pending" });

@@ -3,6 +3,7 @@
 // can claim their paths before fleetRoutes' blanket requireAuth). Verifies
 // every pre-4K endpoint family still behaves identically.
 import Database from "better-sqlite3";
+import { driveSteps } from "./gate-helper.mjs";
 import { NBO_NKU } from "./fixtures.mjs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -138,10 +139,7 @@ async function main() {
     assert(createTrip.status === 201, `create-trip failed: ${JSON.stringify(createTrip.json)}`);
     const trip = createTrip.json;
 
-    for (const status of ["Dispatched", "At Pickup", "Loading", "In Transit", "At Delivery"]) {
-      const r = await api(peter.token, "POST", `/api/trips/${trip.id}/status`, { status });
-      assert(r.status === 200, `driver step ${status} failed: ${JSON.stringify(r.json)}`);
-    }
+    await driveSteps({ tripId: trip.id, driverToken: peter.token, statuses: ["Dispatched", "At Pickup", "Loading", "In Transit", "At Delivery"] });
     const delivered = await api(demoShipper.token, "POST", `/api/trips/${trip.id}/status`, { status: "Delivered" });
     assert(delivered.status === 200 && delivered.json.status === "Delivered", "final delivery confirmation failed");
 

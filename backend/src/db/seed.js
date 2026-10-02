@@ -10,8 +10,8 @@
 
 import bcrypt from "bcryptjs";
 import { db, sqlite } from "./client.js";
-import { fleetOwners, trucks, drivers, trips, locationUpdates, users, loads } from "./schema.js";
-import { DEMO_FLEET_OWNER, FLEET_SEED_TRUCKS, FLEET_SEED_DRIVERS } from "../../../src/data/fleetSeed.js";
+import { fleetOwners, trucks, drivers, trips, locationUpdates, users, loads, loadingSites, loadingAgentSites } from "./schema.js";
+import { DEMO_FLEET_OWNER, FLEET_SEED_TRUCKS, FLEET_SEED_DRIVERS } from "./fixtures/fleetSeed.js";
 import { createTrip, TRIP_STATUS } from "../../../src/models/trip.js";
 import { createLoad, LOAD_STATUS } from "../domain/load.js";
 
@@ -78,6 +78,7 @@ async function seed() {
       licenseNumber: d.licenseNumber || null,
       assignedTruckId: isJames ? kdj.id : isPeter ? kbd.id : d.assignedTruckId,
       status: (isJames || isPeter) ? "Assigned" : d.status,
+      fleetOwnerId: DEMO_FLEET_OWNER.id,
     }).onConflictDoNothing().run();
   }
 
@@ -139,10 +140,25 @@ async function seed() {
     { id: "USR-1004", phone: DEMO_FLEET_OWNER.phone, role: "fleet_owner", name: DEMO_FLEET_OWNER.name, driverId: null, fleetOwnerId: DEMO_FLEET_OWNER.id },
     { id: "USR-1005", phone: "0700000003", role: "shipper",     name: "Mary Achieng",   driverId: null },
     { id: "USR-1006", phone: "0711000000", role: "fleet_owner", name: "Daniel Kiplagat", driverId: null, fleetOwnerId: "FO-1001" },
+    { id: "USR-1007", phone: "0700000010", role: "loading_agent", name: "Gate Agent Nairobi", driverId: null },
+    { id: "USR-1008", phone: "0700000011", role: "loading_agent", name: "Gate Agent Mombasa", driverId: null },
   ];
 
   for (const u of seedUsers) {
     db.insert(users).values({ ...u, pinHash }).onConflictDoNothing().run();
+  }
+
+  // 5E-2 — minimum gate fixture for browser/API testing: two sites, one agent each.
+  const seededAt = new Date().toISOString();
+  const demoSites = [
+    { id: "LS-1000", name: "Nairobi EPZ Loading Yard", lat: -1.3891, lng: 36.9425, radiusMeters: 300 },
+    { id: "LS-1001", name: "Mombasa Port Loading Yard", lat: -4.0435, lng: 39.6682, radiusMeters: 300 },
+  ];
+  for (const site of demoSites) {
+    db.insert(loadingSites).values({ ...site, active: 1, createdAt: seededAt, updatedAt: seededAt }).onConflictDoNothing().run();
+  }
+  for (const [agentUserId, siteId] of [["USR-1007", "LS-1000"], ["USR-1008", "LS-1001"]]) {
+    db.insert(loadingAgentSites).values({ agentUserId, siteId, createdById: "USR-1003", createdAt: seededAt }).onConflictDoNothing().run();
   }
 
   console.log(`Seeded ${FLEET_SEED_TRUCKS.length} trucks, ${FLEET_SEED_DRIVERS.length} drivers, ${seedUsers.length} users.`);

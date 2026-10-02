@@ -26,6 +26,9 @@ export const NOTIFICATION_TYPE = {
   ADJUSTMENT_PROPOSED: "adjustment_proposed", // -> the shipper (a transporter requested an increase)
   ADJUSTMENT_DECIDED:  "adjustment_decided",  // -> the transporter (approved or rejected)
   ADJUSTMENT_FUNDED:   "adjustment_funded",   // -> the transporter
+  GATE_IN:             "gate_in",             // -> shipper + transporter + the driver (arrival verified at the site; trip status unchanged)
+  LOADING_STARTED:     "loading_started",     // -> shipper + transporter + the driver (trip now Loading)
+  LOADING_COMPLETED:   "loading_completed",   // -> shipper + transporter + the driver (trip now In Transit)
 };
 
 export function generateNotificationId(existingCount) {

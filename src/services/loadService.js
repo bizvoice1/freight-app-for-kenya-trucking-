@@ -43,8 +43,6 @@
  *     closeDispute(loadId, resolution)
  */
 
-import { MARKETPLACE_LOADS } from "../data/loads.js";
-import { SEED_LOADS } from "../data/seedLoads.js";
 import {
   createLoadFromForm,
   createBookingNotification,
@@ -71,47 +69,15 @@ function nowStamp() {
  * It is hydrated from localStorage on first import and persisted after
  * every mutation, so data survives page refreshes without a backend.
  */
-const STORE_KEY = "behari_store_v2";
-
-function _persist() {
+/* 5P-2: no persistence. Business state lives in the backend; this store is
+   an in-memory session cache only. Legacy keys are purged once per browser. */
+const LEGACY_KEYS = ["behari_store_v2","behari_fleet_v1","behari_carrier_fleet","behari_trip_v1","behari_gps_v1","behari_matching_v1","behari_carrier_notifs"];
+function _persist() {}
+function _purgeLegacyStores() {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify({
-      ..._store,
-      deliveredIds: [..._store.deliveredIds],  // Set → Array for JSON
-    }));
-  } catch { /* storage full or private mode — silently skip */ }
-}
-
-function _hydrate() {
-  try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) return;
-    const saved = JSON.parse(raw);
-    if (saved.postedLoads)    _store.postedLoads    = saved.postedLoads;
-    if (saved.bookings)       _store.bookings       = saved.bookings;
-    if (saved.deliveredIds)   _store.deliveredIds   = new Set(saved.deliveredIds);
-    if (saved.loadStatuses)   _store.loadStatuses   = saved.loadStatuses;
-    if (saved.milestones)     _store.milestones     = saved.milestones;
-    if (saved.escrowData)     _store.escrowData     = saved.escrowData;
-    if (saved.disputes)       _store.disputes       = saved.disputes;
-    if (saved.bookingSlots)   _store.bookingSlots   = saved.bookingSlots;
-    if (saved.ratings)        _store.ratings        = saved.ratings;
-    if (saved.carrierRatings) _store.carrierRatings = saved.carrierRatings;
-    if (saved.shipperRatings) _store.shipperRatings = saved.shipperRatings;
-    if (saved.fraudFlags)     _store.fraudFlags     = saved.fraudFlags;
-  } catch { /* corrupted storage — start fresh */ }
-}
-
-/**
- * Phase 5D-1 — the decorative localStorage bids (behari_bids_<loadId>) are retired in
- * favour of backend offers (docs/5D-PRICING-SPEC.md 9.5). Removed once per browser.
- */
-function _purgeLegacyBids() {
-  try {
-    if (localStorage.getItem("behari_bids_purged_5d")) return;
-    Object.keys(localStorage).filter(k => k.startsWith("behari_bids_")).forEach(k => localStorage.removeItem(k));
-    localStorage.setItem("behari_bids_purged_5d", "1");
-  } catch { /* storage unavailable — nothing to purge */ }
+    Object.keys(localStorage).filter(k => LEGACY_KEYS.includes(k) || k.startsWith("behari_bids_") || k.startsWith("behari_chat_") || k==="behari_bids_purged_5d")
+      .forEach(k => localStorage.removeItem(k));
+  } catch { /* storage unavailable */ }
 }
 
 const _store = {
@@ -129,23 +95,13 @@ const _store = {
   fraudFlags:    {},    // { userId → FraudFlag[] }    ← Step 9: admin
 };
 
-// Restore saved state immediately on module load
-_hydrate();
-_purgeLegacyBids();
+_purgeLegacyStores();
 
 /* ── Internal helpers ────────────────────────────────────────────────────── */
 
 function _getLoad(loadId) {
   return (
     _store.postedLoads.find(l => l.id === loadId) ||
-    MARKETPLACE_LOADS.find(l => l.id === loadId) ||
-    // Canonical demo-load set (src/data/seedLoads.js) — Phase 2 of the
-    // seed-data unification: lets any service action (confirmDelivery,
-    // releaseEscrow, ratings, disputes) resolve a correct record for IDs
-    // that previously existed only in a single portal's own hardcoded
-    // array (e.g. KE-2038, KE-2039, KE-2041), instead of silently
-    // defaulting fields like escrow.baseAmount to 0.
-    SEED_LOADS.find(l => l.id === loadId) ||
     null
   );
 }

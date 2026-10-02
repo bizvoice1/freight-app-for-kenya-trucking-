@@ -56,7 +56,7 @@ export default function GoogleMap({ markers = [], path = null, pathColor = "#E85
         disableDefaultUI: true, zoomControl: true, gestureHandling: "cooperative",
       });
       sync();
-    });
+    }).catch(() => { if (alive) unavailRef.current?.(); });
     return () => {
       alive = false;
       pinsRef.current.forEach(p => { p.map = null; });

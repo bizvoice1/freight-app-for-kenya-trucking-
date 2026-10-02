@@ -95,7 +95,7 @@ function DriverLogin({ onLoggedIn, onExit }) {
       <form onSubmit={handleLogin}>
         <label style={{ fontSize:11, color:C.muted, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase", display:"block", marginBottom:6 }}>Phone</label>
         <input
-          value={phone} onChange={e => setPhone(e.target.value)} placeholder="0722100200" inputMode="tel"
+          value={phone} onChange={e => setPhone(e.target.value)} placeholder="07XX XXX XXX" inputMode="tel"
           style={{ width:"100%", boxSizing:"border-box", background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"14px 16px", color:C.white, fontFamily:font, fontSize:16, marginBottom:16 }}
         />
         <label style={{ fontSize:11, color:C.muted, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase", display:"block", marginBottom:6 }}>PIN</label>

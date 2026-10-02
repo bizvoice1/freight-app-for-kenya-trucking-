@@ -134,98 +134,7 @@ export const CORRIDORS = [
 
 /* ── Carrier roster (available for smart dispatch) ────────────────────────── */
 
-export const CARRIER_ROSTER = [
-  {
-    id: "C-NBI-001",
-    name: "Samuel Kipruto",
-    phone: "+254 711 234 567",
-    truckReg: "KCB 445Z",
-    truckType: "22T Flatbed",
-    location: { lat: -1.2921, lng: 36.8219, label: "Nairobi CBD" },
-    corridors: ["NBI-MSA", "NBI-KSM"],
-    rating: 4.8,
-    trips: 127,
-    disputes: 1,
-    fraudFlags: 0,
-    gpsAnomalies: 0,
-    available: true,
-  },
-  {
-    id: "C-MSA-002",
-    name: "Ali Hassan Mwangi",
-    phone: "+254 722 345 678",
-    truckReg: "KDE 112A",
-    truckType: "30T Tanker",
-    location: { lat: -4.0435, lng: 39.6682, label: "Mombasa Port" },
-    corridors: ["NBI-MSA", "MSA-DAR"],
-    rating: 4.6,
-    trips: 89,
-    disputes: 2,
-    fraudFlags: 0,
-    gpsAnomalies: 1,
-    available: true,
-  },
-  {
-    id: "C-KSM-003",
-    name: "Grace Atieno Oduya",
-    phone: "+254 733 456 789",
-    truckReg: "KCJ 889P",
-    truckType: "10T Refrigerated",
-    location: { lat: -0.1022, lng: 34.7617, label: "Kisumu" },
-    corridors: ["NBI-KSM", "NBI-ELD"],
-    rating: 4.9,
-    trips: 203,
-    disputes: 0,
-    fraudFlags: 0,
-    gpsAnomalies: 0,
-    available: true,
-  },
-  {
-    id: "C-ELD-004",
-    name: "Peter Rotich Sang",
-    phone: "+254 700 567 890",
-    truckReg: "KDD 321M",
-    truckType: "22T Curtainsider",
-    location: { lat: 0.5167, lng: 35.2698, label: "Eldoret" },
-    corridors: ["NBI-ELD", "NBI-KLA"],
-    rating: 4.4,
-    trips: 56,
-    disputes: 3,
-    fraudFlags: 1,
-    gpsAnomalies: 2,
-    available: false,
-  },
-  {
-    id: "C-NBI-005",
-    name: "David Mwenda Gitau",
-    phone: "+254 712 678 901",
-    truckReg: "KCA 007X",
-    truckType: "15T Box Truck",
-    location: { lat: -1.3000, lng: 36.8167, label: "Industrial Area, NBI" },
-    corridors: ["NBI-MSA", "NBI-ELD", "NBI-KLA"],
-    rating: 4.7,
-    trips: 144,
-    disputes: 1,
-    fraudFlags: 0,
-    gpsAnomalies: 0,
-    available: true,
-  },
-  {
-    id: "C-NKR-006",
-    name: "Faith Wanjiku Njoroge",
-    phone: "+254 798 789 012",
-    truckReg: "KCG 556T",
-    truckType: "22T Flatbed",
-    location: { lat: -0.4167, lng: 36.9500, label: "Nakuru" },
-    corridors: ["NBI-KSM", "NBI-ELD"],
-    rating: 4.5,
-    trips: 71,
-    disputes: 2,
-    fraudFlags: 0,
-    gpsAnomalies: 1,
-    available: true,
-  },
-];
+export const CARRIER_ROSTER = [];
 
 /* ── Seed data ────────────────────────────────────────────────────────────── */
 
@@ -238,98 +147,9 @@ function _ts(offsetMinutes = 0) {
   );
 }
 
-const SEED_INCIDENTS = [
-  {
-    ...createIncident({
-      type: "BREAKDOWN",
-      severity: "HIGH",
-      loadId: "KE-2041",
-      location: "Nakuru Bypass, A104",
-      description: "KCB 445Z reported engine failure at Nakuru Bypass. Driver contacted; recovery truck dispatched from Nakuru Motor Hub. Cargo (Electronic Components, 18T) secured on roadside.",
-      gps: { lat: -0.3031, lng: 36.0800 },
-      officer: "Amina Osei",
-    }),
-    id: "INC-91022",
-    status: INCIDENT_STATUS.IN_PROGRESS,
-    timeline: [
-      { event: "Incident reported by driver via app", at: "08:14" },
-      { event: "Recovery truck dispatched (ETA 45 min)", at: "08:22" },
-      { event: "Shipper notified via SMS", at: "08:25" },
-    ],
-  },
-  {
-    ...createIncident({
-      type: "BORDER",
-      severity: "MEDIUM",
-      loadId: "KE-2045",
-      location: "Namanga Border Post",
-      description: "KDE 889S held at Namanga for secondary customs inspection. KEBS phytosanitary certificate queried for agricultural goods. Carrier awaiting clearance officer.",
-      gps: { lat: -2.5500, lng: 36.7900 },
-      officer: "James Kariuki",
-    }),
-    id: "INC-91019",
-    status: INCIDENT_STATUS.OPEN,
-    timeline: [
-      { event: "Border hold reported", at: "06:50" },
-      { event: "Customs documentation review initiated", at: "07:15" },
-    ],
-  },
-  {
-    ...createIncident({
-      type: "CARGO_DAMAGE",
-      severity: "HIGH",
-      loadId: "KE-2038",
-      location: "Mombasa Port, Gate 7",
-      description: "Water ingress reported in cargo hold during offloading. Approx 300kg of FMCG goods affected. Insurance claim triggered. Escrow hold applied pending damage assessment.",
-      gps: { lat: -4.0640, lng: 39.6600 },
-      officer: "Amina Osei",
-    }),
-    id: "INC-91011",
-    status: INCIDENT_STATUS.RESOLVED,
-    resolvedAt: _ts(180),
-    resolution: "Damage assessed at KES 45,000. Partial escrow refund of KES 12,000 approved. Insurance claim C-2024-8847 filed.",
-    timeline: [
-      { event: "Damage reported at offloading", at: "14:30" },
-      { event: "Escrow hold applied", at: "14:45" },
-      { event: "Insurance assessor dispatched", at: "15:10" },
-      { event: "Assessment completed — partial loss confirmed", at: "17:20" },
-      { event: "Partial escrow refund approved", at: "18:00" },
-    ],
-  },
-  {
-    ...createIncident({
-      type: "ROAD_CLOSURE",
-      severity: "LOW",
-      loadId: null,
-      location: "Gilgil–Naivasha Section, B3",
-      description: "KeNHA road works closure on B3 between Gilgil and Naivasha. Alternative route via C73 (Naivasha–Nakuru) operational. All NBI-KSM corridor carriers re-routed automatically.",
-      gps: { lat: -0.5167, lng: 36.3667 },
-      officer: "James Kariuki",
-    }),
-    id: "INC-91003",
-    status: INCIDENT_STATUS.RESOLVED,
-    resolvedAt: _ts(60),
-    resolution: "Road reopened after routine resurfacing. All corridor traffic resumed normal routing.",
-    timeline: [
-      { event: "KeNHA closure notice received", at: "05:00" },
-      { event: "Corridor alert broadcast to active carriers", at: "05:15" },
-      { event: "Road reopened", at: "11:30" },
-    ],
-  },
-];
+const SEED_INCIDENTS = [];
 
-const SEED_AUDIT = [
-  { id: "AUD-001", action: "ESCROW_RELEASE",      entity: "KE-2038", detail: "Escrow released KES 145,000 after delivery confirmed",          admin: "Amina Osei",    at: _ts(5)   },
-  { id: "AUD-002", action: "INCIDENT_CREATED",    entity: "INC-91022", detail: "Breakdown incident logged for KE-2041 at Nakuru Bypass",      admin: "System",        at: _ts(12)  },
-  { id: "AUD-003", action: "KYC_APPROVED",        entity: "C-NBI-005", detail: "KYC documents verified — CE licence and Good Conduct",        admin: "James Kariuki", at: _ts(25)  },
-  { id: "AUD-004", action: "DISPUTE_RESOLVED",    entity: "KE-2041",   detail: "Dispute closed — shipper accepted delivery with deduction",   admin: "Amina Osei",    at: _ts(40)  },
-  { id: "AUD-005", action: "FRAUD_FLAG_RAISED",   entity: "C-ELD-004", detail: "Duplicate account risk flagged — shared MSISDN detected",     admin: "System",        at: _ts(60)  },
-  { id: "AUD-006", action: "FORCE_STATUS",        entity: "KE-2042",   detail: "Admin override: status set to DELIVERED after GPS confirm",   admin: "Amina Osei",    at: _ts(95)  },
-  { id: "AUD-007", action: "ACCOUNT_SUSPENDED",   entity: "C-ELD-004", detail: "Account suspended pending fraud investigation",               admin: "James Kariuki", at: _ts(120) },
-  { id: "AUD-008", action: "BROADCAST_ALERT",     entity: "NETWORK",   detail: "Corridor alert: Gilgil–Naivasha closure on B3",              admin: "System",        at: _ts(145) },
-  { id: "AUD-009", action: "PAYOUT_FREEZE",       entity: "NETWORK",   detail: "Payouts frozen for 2h pending reconciliation check",         admin: "Amina Osei",    at: _ts(200) },
-  { id: "AUD-010", action: "PAYOUT_UNFREEZE",     entity: "NETWORK",   detail: "Payout freeze lifted — reconciliation complete",             admin: "Amina Osei",    at: _ts(185) },
-];
+const SEED_AUDIT = [];
 
 const SEED_CARRIER_RISK = CARRIER_ROSTER.map((c) =>
   buildCarrierRiskProfile(c.id, {
@@ -349,7 +169,7 @@ const _adminStore = {
   shipperRiskProfiles: [],
   frozenPayouts:     false,
   frozenPayoutsReason: null,
-  suspendedAccounts: ["C-ELD-004"],           // seed one suspended for demo
+  suspendedAccounts: [],
   broadcastAlerts:   [
     { id: "BA-001", message: "Gilgil–Naivasha B3 closure — use C73 diversion", severity: "MEDIUM", affected: "NBI-KSM corridor", at: _ts(145), active: false },
   ],

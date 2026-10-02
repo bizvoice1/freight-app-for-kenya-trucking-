@@ -37,9 +37,9 @@
  */
 
 import { CARRIER_FLEET_SEED } from "./fleet.js";
-import { createFleetOwner } from "../models/fleetOwner.js";
-import { createTruck, TRUCK_STATUS } from "../models/truck.js";
-import { createDriver, DRIVER_STATUS } from "../models/driver.js";
+import { createFleetOwner } from "../../../../src/models/fleetOwner.js";
+import { createTruck, TRUCK_STATUS } from "../../../../src/models/truck.js";
+import { createDriver, DRIVER_STATUS } from "../../../../src/models/driver.js";
 
 /** The demo account's single fleet owner — matches App.jsx's MY_CARRIER_NAME. */
 export const DEMO_FLEET_OWNER = createFleetOwner(

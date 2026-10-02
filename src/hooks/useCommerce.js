@@ -23,13 +23,15 @@ export function useCommerce(role) {
   const [notifications, setNotifications] = useState([]);
   const [online, setOnline] = useState(true);
   const [ready, setReady] = useState(false);
+  const [sessionError, setSessionError] = useState(null);
   const bookedRef = useRef({});
 
   const refresh = useCallback(async () => {
     try {
       const s = await getSession(role);
       setIdentity(s.user);
-    } catch { setOnline(false); setReady(true); return; }
+    } catch (e) { setIdentity(null); setSessionError(e.message); setOnline(false); setReady(true); return; }
+    setSessionError(null);
     const loadsReq = role === "shipper" ? api.fetchShipperLoads() : api.fetchOpenLoads();
     const [l, o, b, n] = await Promise.all([loadsReq, api.fetchOffers(role), api.fetchBookings(role), api.fetchNotifications(role)]);
     if (!l.ok && l.status === 0) { setOnline(false); setReady(true); return; }
@@ -75,7 +77,7 @@ export function useCommerce(role) {
   }, [role]);
 
   return {
-    identity, loads, offers, bookings, bookedLoads, finance, notifications, online, ready, refresh, markRead,
+    identity, loads, offers, bookings, bookedLoads, finance, notifications, online, ready, sessionError, refresh, markRead,
     threads: groupOfferThreads(offers),
     actions: {
       acceptPostedPrice: wrap(api.acceptPostedPrice),

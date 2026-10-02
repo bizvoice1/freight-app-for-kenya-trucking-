@@ -1,19 +1,14 @@
 import { useState, useEffect, lazy, Suspense } from "react";
-import Onboarding from "./Onboarding.jsx";
+import AuthModal from "./components/AuthModal.jsx";
+import * as session from "./services/session.js";
 import { useLoads } from "./hooks/useLoads.js";
-import { useMatching } from "./hooks/useMatching.js";
 import { FreightContext } from "./context/FreightContext.jsx";
 import { COLORS as C, FONT as font } from "./constants/theme.js";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
-import NetworkStats from "./components/matching/NetworkStats.jsx";
-import { MARKETPLACE_LOADS } from "./data/loads.js";
 import { getAllKnownLoads } from "./services/loadViews.js";
-import { withSeedGeo } from "./models/geo.js";
-import { DEMO_MATCH_CARGO } from "./data/network.js";
 
 // Code-split portals: each bundle loads only when its tab is first opened.
 const BehariFreight = lazy(() => import("../behari-freight-v2.jsx"));
-const BehariPay     = lazy(() => import("../behari-mpesa-v2.jsx"));
 const BehariAdmin   = lazy(() => import("../behari-admin-v2.jsx"));
 const BehariShipper = lazy(() => import("../behari-shipper-v2.jsx"));
 // Phase 4E — the Driver Tracking surface. Deliberately separate from the
@@ -35,177 +30,6 @@ function useWindowWidth() {
     return () => window.removeEventListener("resize", h);
   }, []);
   return w;
-}
-
-/* ── Sign-In Modal ─────────────────────────────────────────── */
-const ROLES = [
-  { id:"driver",  label:"Transporter",  icon:"🚛", sub:"Find & book loads" },
-  { id:"shipper", label:"Shipper",  icon:"📦", sub:"Post cargo & track shipments" },
-  { id:"admin",   label:"Admin",    icon:"⚙",  sub:"Operations & KYC dashboard" },
-];
-
-function SignInModal({ onClose, onSuccess }) {
-  const [role, setRole]       = useState("driver");
-  const [phone, setPhone]     = useState("+254 ");
-  const [pin, setPin]         = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState("");
-  /* Feature 9 — 2FA OTP */
-  const [step, setStep]           = useState(1); // 1=credentials, 2=OTP
-  const [otpCode, setOtpCode]     = useState("");
-  const [otpEntry, setOtpEntry]   = useState("");
-  const [otpError, setOtpError]   = useState("");
-  const [verifying, setVerifying] = useState(false);
-
-  function handleSubmit(e) {
-    e.preventDefault();
-    setError("");
-    if (phone.replace(/\D/g,"").length < 9) { setError("Enter a valid Kenyan phone number."); return; }
-    if (pin.length < 4) { setError("PIN must be at least 4 digits."); return; }
-    setLoading(true);
-    setTimeout(() => {
-      const generated = String(Math.floor(100000 + Math.random() * 900000));
-      setOtpCode(generated);
-      setLoading(false);
-      setStep(2);
-    }, 1100);
-  }
-
-  function handleOtp(e) {
-    e.preventDefault();
-    setOtpError("");
-    if (otpEntry.trim() === otpCode) {
-      setVerifying(true);
-      setTimeout(() => { setVerifying(false); onSuccess(role); }, 900);
-    } else {
-      setOtpError("Incorrect code — check your SMS and try again.");
-    }
-  }
-
-  return (
-    <div style={{ position:"fixed",inset:0,zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:16 }}>
-      {/* Backdrop */}
-      <div onClick={onClose} style={{ position:"absolute",inset:0,background:"rgba(0,0,0,0.55)",backdropFilter:"blur(4px)" }} />
-
-      {/* Card */}
-      <div style={{ position:"relative",background:C.white,borderRadius:16,padding:"28px 24px",width:"100%",maxWidth:400,boxShadow:"0 24px 64px rgba(0,0,0,0.18)",fontFamily:font }}>
-        {/* Close */}
-        <button onClick={onClose} style={{ position:"absolute",top:16,right:16,background:"none",border:"none",fontSize:20,cursor:"pointer",color:C.muted,lineHeight:1 }}>✕</button>
-
-        {/* Logo */}
-        <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:24 }}>
-          <div style={{ width:5,height:20,background:C.green,borderRadius:3 }} />
-          <span style={{ fontSize:15,fontWeight:800,color:C.black }}>Behari Freight</span>
-        </div>
-
-        {step === 1 ? (
-          <>
-            <div style={{ fontSize:22,fontWeight:800,color:C.black,marginBottom:4 }}>Welcome back</div>
-            <div style={{ fontSize:14,color:C.muted,marginBottom:24 }}>Sign in to your account</div>
-
-            {/* Role selector */}
-            <div style={{ fontSize:11,fontWeight:700,color:C.secondary,letterSpacing:0.8,textTransform:"uppercase",marginBottom:8 }}>I am a…</div>
-            <div style={{ display:"flex",gap:8,marginBottom:20 }}>
-              {ROLES.map(r => (
-                <button key={r.id} onClick={() => setRole(r.id)} style={{
-                  flex:1, padding:"10px 6px", borderRadius:10, cursor:"pointer", fontFamily:font,
-                  border:`1.5px solid ${role===r.id ? C.black : C.border}`,
-                  background: role===r.id ? C.black : C.white,
-                  color: role===r.id ? C.white : C.secondary,
-                  transition:"all 0.15s",
-                }}>
-                  <div style={{ fontSize:18, marginBottom:2 }}>{r.icon}</div>
-                  <div style={{ fontSize:11, fontWeight:700 }}>{r.label}</div>
-                </button>
-              ))}
-            </div>
-
-            <form onSubmit={handleSubmit}>
-              {/* Phone */}
-              <div style={{ marginBottom:14 }}>
-                <label style={{ display:"block",fontSize:11,fontWeight:700,color:C.secondary,letterSpacing:0.8,textTransform:"uppercase",marginBottom:5 }}>Phone Number</label>
-                <input
-                  value={phone} onChange={e=>setPhone(e.target.value)} type="tel" placeholder="+254 7XX XXX XXX"
-                  style={{ width:"100%",background:C.bg,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:14,fontFamily:font,color:C.black,outline:"none" }}
-                  onFocus={e=>e.target.style.borderColor=C.black}
-                  onBlur={e=>e.target.style.borderColor=C.border}
-                />
-              </div>
-
-              {/* PIN */}
-              <div style={{ marginBottom:20 }}>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5 }}>
-                  <label style={{ fontSize:11,fontWeight:700,color:C.secondary,letterSpacing:0.8,textTransform:"uppercase" }}>PIN</label>
-                  <span style={{ fontSize:12,color:C.green,fontWeight:600,cursor:"pointer" }}>Forgot PIN?</span>
-                </div>
-                <input
-                  value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,"").slice(0,6))} type="password"
-                  placeholder="••••••" inputMode="numeric"
-                  style={{ width:"100%",background:C.bg,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"12px 14px",fontSize:18,fontFamily:font,color:C.black,outline:"none",letterSpacing:6 }}
-                  onFocus={e=>e.target.style.borderColor=C.black}
-                  onBlur={e=>e.target.style.borderColor=C.border}
-                />
-              </div>
-
-              {error && <div style={{ background:"#FDE8E3",borderRadius:8,padding:"10px 14px",fontSize:13,color:C.red,fontWeight:600,marginBottom:14 }}>⚠ {error}</div>}
-
-              <button type="submit" disabled={loading} style={{
-                width:"100%", background: loading ? C.muted : C.black, color:C.white,
-                border:"none", borderRadius:8, padding:"14px", fontSize:15, fontWeight:700,
-                cursor: loading ? "not-allowed" : "pointer", fontFamily:font, transition:"background 0.15s",
-              }}>
-                {loading ? "Sending OTP…" : "Continue →"}
-              </button>
-            </form>
-
-            <div style={{ textAlign:"center",marginTop:16,fontSize:13,color:C.muted }}>
-              New transporter?{" "}
-              <span onClick={onClose} style={{ color:C.black,fontWeight:700,cursor:"pointer",textDecoration:"underline",textUnderlineOffset:2 }}>Register as a Transporter</span>
-            </div>
-          </>
-        ) : (
-          /* Step 2 — OTP verification */
-          <>
-            <div style={{ fontSize:22,fontWeight:800,color:C.black,marginBottom:4 }}>Verify your phone</div>
-            <div style={{ fontSize:14,color:C.muted,marginBottom:20 }}>We sent a 6-digit code to {phone.trim()}</div>
-
-            {/* Simulated SMS banner */}
-            <div style={{ background:"#E8F5E9",border:"1px solid #A5D6A7",borderRadius:10,padding:"12px 14px",marginBottom:20,display:"flex",gap:10,alignItems:"center" }}>
-              <span style={{ fontSize:18 }}>📱</span>
-              <div>
-                <div style={{ fontSize:11,fontWeight:700,color:"#2E7D32",marginBottom:2 }}>DEMO — SMS from Behari</div>
-                <div style={{ fontSize:13,fontWeight:800,color:"#1B5E20",letterSpacing:4 }}>{otpCode}</div>
-              </div>
-            </div>
-
-            <form onSubmit={handleOtp}>
-              <div style={{ marginBottom:20 }}>
-                <label style={{ display:"block",fontSize:11,fontWeight:700,color:C.secondary,letterSpacing:0.8,textTransform:"uppercase",marginBottom:5 }}>Enter OTP Code</label>
-                <input
-                  value={otpEntry} onChange={e=>setOtpEntry(e.target.value.replace(/\D/g,"").slice(0,6))}
-                  type="text" inputMode="numeric" placeholder="123456" autoFocus maxLength={6}
-                  style={{ width:"100%",background:C.bg,border:`1.5px solid ${otpError?C.red:C.border}`,borderRadius:8,padding:"12px 14px",fontSize:28,fontFamily:font,color:C.black,outline:"none",letterSpacing:10,textAlign:"center" }}
-                  onFocus={e=>e.target.style.borderColor=otpError?C.red:C.black}
-                  onBlur={e=>e.target.style.borderColor=otpError?C.red:C.border}
-                />
-              </div>
-              {otpError && <div style={{ background:"#FDE8E3",borderRadius:8,padding:"10px 14px",fontSize:13,color:C.red,fontWeight:600,marginBottom:14 }}>⚠ {otpError}</div>}
-              <button type="submit" disabled={verifying||otpEntry.length<6} style={{
-                width:"100%",background:verifying||otpEntry.length<6?C.muted:C.black,color:C.white,
-                border:"none",borderRadius:8,padding:"14px",fontSize:15,fontWeight:700,
-                cursor:verifying||otpEntry.length<6?"not-allowed":"pointer",fontFamily:font,
-              }}>
-                {verifying?"Verifying…":"✓ Confirm & Sign In"}
-              </button>
-            </form>
-            <button onClick={()=>setStep(1)} style={{ width:"100%",background:"none",border:"none",color:C.muted,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:font,marginTop:14,textAlign:"center" }}>
-              ← Back
-            </button>
-          </>
-        )}
-      </div>
-    </div>
-  );
 }
 
 /* ── About Modal ───────────────────────────────────────────── */
@@ -412,30 +236,22 @@ function LegalModal({ onClose, initialTab = "terms" }) {
 const PORTALS = [
   { id:"driver",  label:"Transporter App",     sub:"Find & book loads",         icon:"🚛", component:BehariFreight },
   { id:"shipper", label:"Shipper Portal",   sub:"Post cargo & track loads",  icon:"📦", component:BehariShipper },
-  { id:"pay",     label:"M-Pesa Escrow",    sub:"Payment & escrow engine",   icon:"📱", component:BehariPay     },
   { id:"admin",   label:"Admin Dashboard",  sub:"Operations & KYC centre",   icon:"⚙", component:BehariAdmin   },
   { id:"tracker", label:"Driver Tracker",   sub:"Live location sharing",     icon:"📍", component:BehariDriverTracker },
   { id:"marketplace", label:"Marketplace",  sub:"Real loads & bookings (backend)", icon:"🏪", component:BehariMarketplace },
 ];
 
 const NAV_LABELS = {
-  driver:"Transporter", shipper:"Shipper", pay:"M-Pesa", admin:"Admin", tracker:"Driver Tracker", marketplace:"Marketplace"
+  driver:"Transporter", shipper:"Shipper", admin:"Admin", tracker:"Driver Tracker", marketplace:"Marketplace"
 };
 
-// Which portals each role can access
+// Portals reachable per signed-in identity (derived from the backend role, never chosen).
+const BACKEND_TO_APP_ROLE = { shipper:"shipper", fleet_owner:"driver", driver:"tracker", admin:"admin" };
 const ROLE_ACCESS = {
-  driver:  ["driver"],
-  shipper: ["shipper"],
-  admin:   ["driver", "shipper", "pay", "admin"],
-  // Deliberately its own role, not folded into "driver" (the fleet owner's
-  // Carrier app) — a truck's driver and its owner are frequently different
-  // people (see models/fleetOwner.js), so this can't assume the person
-  // holding the phone is signed in anywhere else in the app.
+  driver:  ["driver", "marketplace"],
+  shipper: ["shipper", "marketplace"],
+  admin:   ["admin"],
   tracker: ["tracker"],
-  // Phase 4H — also its own role: it authenticates against the real
-  // backend (shipper or fleet_owner), independent of the legacy
-  // localStorage role simulation the other portals still use.
-  marketplace: ["marketplace"],
 };
 
 const ROLE_NAMES = {
@@ -444,14 +260,9 @@ const ROLE_NAMES = {
 
 export default function App() {
   const isMobile = useWindowWidth() < 480;
-  const [active, setActive]           = useState(() => {
-    try { return localStorage.getItem("behari_active") || null; } catch { return null; }
-  });
-  const [role, setRole]               = useState(() => {
-    try { return localStorage.getItem("behari_role") || null; } catch { return null; }
-  }); // "driver" | "shipper" | "admin"
-  const [registering, setRegistering] = useState(false);
-  const [signingIn, setSigningIn]     = useState(false);
+  const [sess, setSess]           = useState(() => session.currentSession());
+  const [pickedPortal, setPickedPortal] = useState(null);
+  const [auth, setAuth]               = useState(null); // null | {mode, role}
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [showAbout, setShowAbout]     = useState(false);
   const [showLegal, setShowLegal]     = useState(null);  // null | "terms" | "privacy"
@@ -530,45 +341,30 @@ export default function App() {
     adminForceStatus:   handleAdminForceStatus,
   } = useLoads();
 
-  // ── Matching engine (Truck ↔ Cargo) — independent of useLoads(), wired
-  // alongside it into sharedProps/FreightContext so every portal + the
-  // landing page can consume it without new prop-drilling.
-  const matching = useMatching();
-  const matchingCargoPool = [...postedLoads, ...MARKETPLACE_LOADS, ...DEMO_MATCH_CARGO].map(l => ({
-    ...withSeedGeo(l), status: loadStatuses[l.id] ?? l.status,
-  }));
   useEffect(() => {
-    matching.refreshNetworkStats(matchingCargoPool);
-  }, [matchingCargoPool.length, matching.truckAvailabilities.length]); // eslint-disable-line
+    const un = session.subscribe(setSess);
+    session.restore();
+    return un;
+  }, []);
 
-  function signIn(selectedRole, portalId) {
-    const portal = portalId ?? ROLE_ACCESS[selectedRole][0];
-    setRole(selectedRole);
-    setActive(portal);
-    try {
-      localStorage.setItem("behari_role",   selectedRole);
-      localStorage.setItem("behari_active", portal);
-    } catch {}
-  }
+  const role = sess ? (BACKEND_TO_APP_ROLE[sess.user.role] ?? null) : null;
+
+  function openAuth(mode, backendRole) { setAuth({ mode, role: backendRole }); }
 
   function doLogout() {
     setLogoutConfirm(false);
-    setActive(null);
-    setRole(null);
-    try {
-      localStorage.removeItem("behari_role");
-      localStorage.removeItem("behari_active");
-    } catch {}
+    setPickedPortal(null);
+    session.logout();
   }
 
-  // Portals this role is allowed to see
+  // Portals this identity is allowed to see
   const allowedPortals = role ? PORTALS.filter(p => ROLE_ACCESS[role].includes(p.id)) : [];
-
-  if (registering) return <Onboarding onClose={() => setRegistering(false)} />;
+  const active = role ? (allowedPortals.some(p => p.id === pickedPortal) ? pickedPortal : allowedPortals[0]?.id) : null;
 
   if (active) {
     const Portal = PORTALS.find(p => p.id === active).component;
     const roleName = ROLE_NAMES[role] ?? "User";
+    const who = sess?.user;
     const multiPortal = allowedPortals.length > 1;
 
     const triggerLogout = () => setLogoutConfirm(true);
@@ -602,24 +398,6 @@ export default function App() {
       onFlagFraud:          handleFlagFraud,
       onResolveFraudFlag:   handleResolveFraudFlag,
       onAdminForceStatus:   handleAdminForceStatus,
-
-      // Matching engine (Truck ↔ Cargo) — see hooks/useMatching.js
-      matchingCargoPool,
-      truckAvailabilities:    matching.truckAvailabilities,
-      matches:                matching.matches,
-      matchNotifications:     matching.matchNotifications,
-      networkStats:           matching.networkStats,
-      onDeclareAvailability:  matching.declareAvailability,
-      onCancelAvailability:   matching.cancelAvailability,
-      onFindMatchesForTruck:  matching.findMatchesForTruck,
-      onFindMatchesForCargo:  matching.findMatchesForCargo,
-      onRequestMatch:         matching.requestMatch,
-      onAcceptMatch:          matching.acceptMatch,
-      onDeclineMatch:         matching.declineMatch,
-      onGetUnmatchedTrucks:   matching.getUnmatchedTrucks,
-      onGetUnmatchedCargo:    matching.getUnmatchedCargo,
-      onCheckNewCargoForMatches: matching.checkNewCargoForMatches,
-      onMarkNotificationRead: matching.markNotificationRead,
     };
 
     return (
@@ -656,23 +434,7 @@ export default function App() {
               <div style={{ width:36,height:4,background:C.border,borderRadius:2,margin:"0 auto 20px" }} />
               <div style={{ fontSize:18,fontWeight:800,color:C.black,marginBottom:6 }}>Account</div>
               <div style={{ fontSize:14,color:C.muted,marginBottom:20 }}>
-                Signed in as <strong style={{ color:C.black }}>{roleName}</strong>
-              </div>
-
-              {/* Switch portal — show other available roles */}
-              <div style={{ fontSize:11,fontWeight:700,color:C.secondary,letterSpacing:0.8,textTransform:"uppercase",marginBottom:8 }}>Switch Portal</div>
-              <div style={{ display:"flex",gap:8,marginBottom:20 }}>
-                {[
-                  { r:"driver",  label:"Transporter",  icon:"🚛" },
-                  { r:"shipper", label:"Shipper",  icon:"📦" },
-                  { r:"admin",   label:"Admin",    icon:"⚙"  },
-                ].filter(p => p.r !== role).map(p => (
-                  <button key={p.r} onClick={() => { setLogoutConfirm(false); signIn(p.r); }}
-                    style={{ flex:1,background:C.bg,color:C.black,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"10px 6px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,display:"flex",flexDirection:"column",alignItems:"center",gap:4 }}>
-                    <span style={{ fontSize:18 }}>{p.icon}</span>
-                    {p.label}
-                  </button>
-                ))}
+                Signed in as <strong style={{ color:C.black }}>{who?.name}</strong> · {roleName}
               </div>
 
               <div style={{ display:"flex",gap:10 }}>
@@ -711,7 +473,7 @@ export default function App() {
                     return (
                       <button
                         key={p.id}
-                        onClick={() => { setActive(p.id); setPortalOpen(false); }}
+                        onClick={() => { setPickedPortal(p.id); setPortalOpen(false); }}
                         style={{
                           display:"flex",alignItems:"center",gap:10,
                           background: isCurrent ? C.black : C.bg,
@@ -769,10 +531,12 @@ export default function App() {
     <div style={{ minHeight:"100vh",background:C.white,fontFamily:font,display:"flex",flexDirection:"column" }}>
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       {showLegal && <LegalModal initialTab={showLegal} onClose={()=>setShowLegal(null)} />}
-      {signingIn && (
-        <SignInModal
-          onClose={() => setSigningIn(false)}
-          onSuccess={(selectedRole) => { setSigningIn(false); signIn(selectedRole); }}
+      {auth && (
+        <AuthModal
+          initialMode={auth.mode}
+          initialRole={auth.role}
+          onClose={() => setAuth(null)}
+          onDone={() => { setAuth(null); setPickedPortal(null); }}
         />
       )}
       <style>{`
@@ -792,7 +556,7 @@ export default function App() {
           {!isMobile && <span onClick={() => setShowAbout(true)} style={{ fontSize:13,color:C.secondary,fontWeight:500,cursor:"pointer" }}>About</span>}
           {!isMobile && <span style={{ fontSize:13,color:C.secondary,fontWeight:500,cursor:"pointer" }}>Transporters</span>}
           {!isMobile && <span style={{ fontSize:13,color:C.secondary,fontWeight:500,cursor:"pointer" }}>Shippers</span>}
-          <button onClick={() => setSigningIn(true)} style={{ background:C.black,color:C.white,border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font }}>Sign In</button>
+          <button onClick={() => openAuth("login","shipper")} style={{ background:C.black,color:C.white,border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font }}>Sign In</button>
         </div>
       </div>
 
@@ -811,31 +575,21 @@ export default function App() {
             Behari connects available trucks with cargo that needs moving — including return loads and cargo along the route. M-Pesa escrow protects the payment once a match is booked.
           </p>
           <div style={{ display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap" }}>
-            <button onClick={()=>signIn("driver")} style={{ background:C.white,color:C.black,border:"none",borderRadius:8,padding:"15px 30px",fontSize:16,fontWeight:800,cursor:"pointer",fontFamily:font }}>
+            <button onClick={()=>openAuth("register","fleet_owner")} style={{ background:C.white,color:C.black,border:"none",borderRadius:8,padding:"15px 30px",fontSize:16,fontWeight:800,cursor:"pointer",fontFamily:font }}>
               🚛 I Have a Truck
             </button>
-            <button onClick={()=>signIn("shipper")} style={{ background:C.green,color:C.black,border:"none",borderRadius:8,padding:"15px 30px",fontSize:16,fontWeight:800,cursor:"pointer",fontFamily:font }}>
+            <button onClick={()=>openAuth("register","shipper")} style={{ background:C.green,color:C.black,border:"none",borderRadius:8,padding:"15px 30px",fontSize:16,fontWeight:800,cursor:"pointer",fontFamily:font }}>
               📦 I Have Cargo
             </button>
           </div>
           <div style={{ marginTop:16, display:"flex", gap:20, justifyContent:"center", flexWrap:"wrap" }}>
-            <button onClick={()=>setRegistering(true)} style={{ background:"transparent",color:C.green,border:"none",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font,textDecoration:"underline",textUnderlineOffset:3 }}>
-              New transporter? Register as a Transporter →
+            <button onClick={()=>openAuth("login","shipper")} style={{ background:"transparent",color:C.green,border:"none",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font,textDecoration:"underline",textUnderlineOffset:3 }}>
+              Already registered? Sign in →
             </button>
-            <button onClick={()=>signIn("tracker")} style={{ background:"transparent",color:"rgba(255,255,255,0.6)",border:"none",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font,textDecoration:"underline",textUnderlineOffset:3 }}>
-              📍 I'm a driver — open Driver Tracker →
-            </button>
-            <button onClick={()=>signIn("marketplace")} style={{ background:"transparent",color:"rgba(255,255,255,0.6)",border:"none",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font,textDecoration:"underline",textUnderlineOffset:3 }}>
-              🏪 Real Marketplace (backend) →
+            <button onClick={()=>openAuth("login","driver")} style={{ background:"transparent",color:"rgba(255,255,255,0.6)",border:"none",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font,textDecoration:"underline",textUnderlineOffset:3 }}>
+              📍 Driver sign in →
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* Network stats — matching engine activity (simulated demo data) */}
-      <div style={{ background:"#FAFAFA",borderBottom:`1px solid ${C.border}`,padding:"20px 24px" }}>
-        <div style={{ maxWidth:520,margin:"0 auto" }}>
-          <NetworkStats stats={matching.networkStats} compact={isMobile} />
         </div>
       </div>
 
@@ -844,27 +598,14 @@ export default function App() {
         <div style={{ maxWidth:800,margin:"0 auto" }}>
           <div style={{ textAlign:"center",marginBottom:36 }}>
             <h2 style={{ fontSize:28,fontWeight:800,color:C.black,letterSpacing:-0.5,marginBottom:8 }}>Choose your portal</h2>
-            <p style={{ fontSize:15,color:C.muted }}>Each view is a live interactive demo — click to explore</p>
-          </div>
-
-          {/* Enroll CTA */}
-          <div style={{ background:C.black,borderRadius:12,padding:"24px",marginBottom:16,display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"center",gap:16 }}>
-            <div>
-              <div style={{ fontSize:11,color:"rgba(255,255,255,0.45)",fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:4 }}>New Transporter?</div>
-              <div style={{ fontSize:18,fontWeight:800,color:C.white,marginBottom:4 }}>Join as a Transporter</div>
-              <div style={{ fontSize:13,color:"rgba(255,255,255,0.55)" }}>Fill in your details, upload your documents and get approved in under 24 hours.</div>
-            </div>
-            <button onClick={()=>setRegistering(true)} style={{ background:C.green,color:C.black,border:"none",borderRadius:8,padding:"12px 20px",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:font,whiteSpace:"nowrap",flexShrink:0 }}>
-              Register Now →
-            </button>
+            <p style={{ fontSize:15,color:C.muted }}>Sign in with your Behari account to open your portal</p>
           </div>
 
           <div style={{ display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:16 }}>
-            {PORTALS.map(p=>{
-              // Map each card to the correct sign-in role
-              const cardRole = p.id === "driver" ? "driver" : p.id === "shipper" ? "shipper" : "admin";
+            {PORTALS.filter(p => p.id !== "marketplace").map(p=>{
+              const cardRole = { driver:"fleet_owner", shipper:"shipper", admin:"admin", tracker:"driver" }[p.id];
               return (
-                <button key={p.id} onClick={()=>signIn(cardRole, p.id)} style={{
+                <button key={p.id} onClick={()=>openAuth("login", cardRole)} style={{
                   background:C.white,border:`1.5px solid ${C.border}`,borderRadius:12,
                   padding:"28px 24px",textAlign:"left",cursor:"pointer",fontFamily:font,
                   transition:"all 0.15s",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"
@@ -875,7 +616,7 @@ export default function App() {
                   <div style={{ width:44,height:44,background:C.bg,borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,marginBottom:16 }}>{p.icon}</div>
                   <div style={{ fontSize:18,fontWeight:700,color:C.black,marginBottom:4 }}>{p.label}</div>
                   <div style={{ fontSize:13,color:C.muted,fontWeight:400,marginBottom:16 }}>{p.sub}</div>
-                  <div style={{ fontSize:12,fontWeight:700,color:C.black }}>Open demo →</div>
+                  <div style={{ fontSize:12,fontWeight:700,color:C.black }}>Sign in →</div>
                 </button>
               );
             })}

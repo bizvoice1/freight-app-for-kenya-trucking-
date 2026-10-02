@@ -61,7 +61,7 @@ export default function LiveTrackingPanel({ trip, location, loading, error, truc
         <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#06C167", boxShadow: "0 0 8px #06C167aa" }} />
         <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1, color: "#06C167" }}>{trip.status.toUpperCase()}</span>
       </div>
-      <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 2 }}>{truckPlate || trip.truckId}</div>
+      <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 2 }}>{truckPlate || "Assigned truck"}</div>
       <div style={{ fontSize: 13, color: "#9E9E9E", marginBottom: 14 }}>{trip.pickup} → {trip.delivery}</div>
 
       {location ? (
@@ -80,7 +80,7 @@ export default function LiveTrackingPanel({ trip, location, loading, error, truc
           </div>
         </div>
       ) : (
-        <div style={{ fontSize: 12, color: "#8A8A8A" }}>No location reported yet.</div>
+        <div style={{ fontSize: 12, color: "#8A8A8A" }}>Live location unavailable.</div>
       )}
     </div>
   );

@@ -124,6 +124,10 @@ const DRIVER_TRANSITIONS = new Set([
   `${TRIP_STATUS.IN_TRANSIT}->${TRIP_STATUS.AT_DELIVERY}`,
   `${TRIP_STATUS.AT_DELIVERY}->${TRIP_STATUS.DELIVERED}`,
 ]);
+const GATE_OWNED_TRANSITIONS = new Set([
+  `${TRIP_STATUS.AT_PICKUP}->${TRIP_STATUS.LOADING}`,
+  `${TRIP_STATUS.LOADING}->${TRIP_STATUS.IN_TRANSIT}`,
+]);
 const SHIPPER_CONFIRM_DELIVERY = `${TRIP_STATUS.AT_DELIVERY}->${TRIP_STATUS.DELIVERED}`;
 
 /**
@@ -227,6 +231,15 @@ router.post("/:tripId/status", asyncHandler(async (req, res) => {
 
   const auth = await authorizeTransition(req, trip, nextStatus);
   if (!auth.ok) return res.status(auth.code).json({ error: auth.error });
+
+  // 5E-2: these two transitions are owned by the gate service. A verified Loading Agent scan is the
+  // only way to make them, for every role (admin included) — the status route is not an override.
+  if (GATE_OWNED_TRANSITIONS.has(`${trip.status}->${nextStatus}`)) {
+    return res.status(409).json({
+      error: `${trip.status} -> ${nextStatus} requires verified loading evidence from a Loading Agent.`,
+      code: "LOADING_EVIDENCE_REQUIRED",
+    });
+  }
 
   if (!canTransitionTrip(trip.status, nextStatus)) {
     return res.status(409).json({ error: `Cannot move trip ${trip.id} from ${trip.status} to ${nextStatus}.` });
@@ -347,7 +360,7 @@ router.post("/:tripId/location", requireRole("driver"), asyncHandler(async (req,
     return res.status(422).json({ accepted: false, reason: rejection });
   }
 
-  const existingCount = await _countLocationUpdates(trip.id);
+  const existingCount = (await db.select({ id: locationUpdates.id }).from(locationUpdates)).length;
   const update = createLocationUpdate(
     { tripId: trip.id, truckId: trip.truckId, driverId: trip.driverId, lat, lng, accuracy, speed, heading, source: "device" },
     existingCount
@@ -384,11 +397,6 @@ router.get("/:tripId/location/history", asyncHandler(async (req, res) => {
     .orderBy(asc(locationUpdates.timestamp));
   res.json(history);
 }));
-
-async function _countLocationUpdates(tripId) {
-  const rows = await db.select().from(locationUpdates).where(eq(locationUpdates.tripId, tripId));
-  return rows.length;
-}
 
 async function _latestLocation(tripId) {
   const rows = await db

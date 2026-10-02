@@ -22,66 +22,21 @@
  *   trust boundary).
  */
 
-// A real driver opens this screen on their OWN phone, not the machine
-// running the backend — hardcoding "localhost" here means the phone calls
-// itself and every request silently fails to connect (surfaces as "Could
-// not reach the tracking backend", i.e. "I can't log in"). Default to
-// whatever host actually served this page (vite.config.js already exposes
-// the dev server on the LAN via host:true) so it resolves correctly
-// whether opened locally or from another device on the same network, with
-// no per-network manual config. VITE_API_BASE_URL still wins if set.
-const API_BASE = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL)
-  || (typeof window !== "undefined" && `http://${window.location.hostname}:4000`)
-  || "http://localhost:4000";
-const TOKEN_KEY = "behari_driver_token";
-const USER_KEY  = "behari_driver_user";
+import { API_BASE, currentSession, authAuthHeader, login as sessionLogin, logout as sessionLogout } from "./session.js";
 
-function _authHeaders() {
-  const token = _getToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+function _authHeaders() { return authAuthHeader(); }
+function _getToken() { return currentSession()?.token ?? null; }
 
-function _getToken() {
-  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
-}
+/** Logs a driver in against the real backend (shared session). */
+export async function loginDriver(phone, pin) { return sessionLogin(phone, pin, "driver"); }
 
-/**
- * Logs a driver in against the real backend. phone+PIN, exactly like the
- * rest of this demo's sign-in — the difference is the backend now actually
- * verifies it (bcrypt-hashed PIN) and issues a token, rather than the
- * client just remembering a chosen name.
- *
- * @returns {Promise<{ok:boolean, user?:Object, error?:string}>}
- */
-export async function loginDriver(phone, pin) {
-  try {
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone, pin, role: "driver" }),
-    });
-    const data = await res.json();
-    if (!res.ok) return { ok: false, error: data.error || "Login failed." };
-    localStorage.setItem(TOKEN_KEY, data.token);
-    localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-    return { ok: true, user: data.user };
-  } catch {
-    return { ok: false, error: `Could not reach the tracking backend at ${API_BASE}.` };
-  }
-}
-
-/** The driver identity attached to the current token, or null if not logged in. */
+/** The driver identity attached to the current session, or null if not signed in as a driver. */
 export function getCurrentDriverUser() {
-  try {
-    if (!_getToken()) return null;
-    const raw = localStorage.getItem(USER_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+  const s = currentSession();
+  return s && s.user.role === "driver" ? s.user : null;
 }
 
-export function logoutDriver() {
-  try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(USER_KEY); } catch { /* ignore */ }
-}
+export function logoutDriver() { sessionLogout(); }
 
 // Runtime-only — see Phase 4E's identical note: a watch handle can't survive
 // reload, and shouldn't; reopening the screen re-requests a fresh GPS lock.

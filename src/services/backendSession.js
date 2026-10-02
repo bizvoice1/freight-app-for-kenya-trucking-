@@ -1,39 +1,19 @@
 /**
  * src/services/backendSession.js
  * -------------------------------
- * 5D-3 — the demo-credential bridge. Owns API_BASE, the demo logins and the
- * per-role session ({token, user}) so every API client shares one login and
- * every portal can read the authenticated backend identity (id + name)
- * instead of hardcoding one. Real portal authentication replaces this later.
+ * 5P-1 — API clients get their identity from the ONE real session
+ * (services/session.js). There are no demo credentials: if nobody is signed
+ * in as the requested role, calls fail loudly instead of authenticating as a
+ * seeded user the UI never showed.
  */
-export const API_BASE = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL)
-  || (typeof window !== "undefined" && `http://${window.location.hostname}:4000`)
-  || "http://localhost:4000";
+import { currentSession, API_BASE } from "./session.js";
+export { API_BASE };
 
-// Matches backend/src/db/seed.js — see backend/README.md's dev login table.
-const DEMO_CREDENTIALS = {
-  shipper:     { phone: "0700000001", pin: "1234" },
-  admin:       { phone: "0700000002", pin: "1234" },
-  fleet_owner: { phone: "0722100200", pin: "1234" },
-};
-
-const _sessions = new Map(); // role -> Promise<{token, user}>
-
-export function getSession(role) {
-  if (_sessions.has(role)) return _sessions.get(role);
-  const creds = DEMO_CREDENTIALS[role];
-  if (!creds) return Promise.reject(new Error(`No demo credentials configured for role "${role}".`));
-  const p = fetch(`${API_BASE}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...creds, role }),
-  }).then(async (res) => {
-    if (!res.ok) throw new Error(`Could not authenticate with the backend as ${role}.`);
-    const data = await res.json();
-    return { token: data.token, user: data.user };
-  }).catch((err) => { _sessions.delete(role); throw err; });
-  _sessions.set(role, p);
-  return p;
+export async function getSession(role) {
+  const s = currentSession();
+  if (!s) throw new Error("Not signed in.");
+  if (role && s.user.role !== role) throw new Error(`Signed in as ${s.user.role}, not ${role}.`);
+  return s;
 }
 
 export async function getToken(role) { return (await getSession(role)).token; }

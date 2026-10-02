@@ -1,6 +1,7 @@
 // Phase 5D-2 acceptance — Adjustment Ledger Foundation. Real HTTP against a freshly migrated +
 // seeded backend on :4000, plus direct SQLite access to prove the database-level backstops.
 import Database from "better-sqlite3";
+import { driveSteps } from "./gate-helper.mjs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { NBO_NKU } from "./fixtures.mjs";
@@ -110,10 +111,7 @@ async function waitAdjStatus(adjId, status) {
   return waitFor(async () => { const a = (await api(shipper.token, "GET", `/api/adjustments/${adjId}`)).json; return a.status === status ? a : null; });
 }
 async function deliver(tripId) {
-  for (const status of ["Dispatched", "At Pickup", "Loading", "In Transit", "At Delivery"]) {
-    const r = await api(peter.token, "POST", `/api/trips/${tripId}/status`, { status });
-    assert(r.status === 200, `driver to ${status} failed ${JSON.stringify(r.json)}`);
-  }
+  await driveSteps({ tripId, driverToken: peter.token, statuses: ["Dispatched", "At Pickup", "Loading", "In Transit", "At Delivery"] });
   const r = await api(shipper.token, "POST", `/api/trips/${tripId}/status`, { status: "Delivered" });
   assert(r.status === 200, `Delivered failed ${JSON.stringify(r.json)}`);
 }

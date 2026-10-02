@@ -76,7 +76,7 @@ router.get("/", asyncHandler(async (req, res) => {
     const ownLoads = await db.select().from(loads).where(eq(loads.shipperId, req.user.id));
     const ownLoadIds = new Set(ownLoads.map(l => l.id));
     rows = rows.filter(b => ownLoadIds.has(b.loadId));
-  } else if (req.user.role === "driver") {
+  } else if (req.user.role !== "admin") {
     rows = [];
   }
 
@@ -106,7 +106,7 @@ router.post("/:bookingId/assign", requireRole("fleet_owner"), asyncHandler(async
   if (!ownsBooking(req, booking)) {
     return res.status(403).json({ error: "This booking does not belong to the authenticated transporter." });
   }
-  if (booking.status !== BOOKING_STATUS.ACCEPTED) {
+  if (booking.status !== BOOKING_STATUS.ACCEPTED && booking.status !== BOOKING_STATUS.ASSIGNED) {
     return res.status(409).json({ error: `Booking ${booking.id} is not awaiting assignment (status: ${booking.status}).` });
   }
 
@@ -117,6 +117,9 @@ router.post("/:bookingId/assign", requireRole("fleet_owner"), asyncHandler(async
   if (!driver) return res.status(404).json({ error: `No driver found with id ${driverId}.` });
   if (req.user.fleetOwnerId && truck.ownerId !== req.user.fleetOwnerId) {
     return res.status(403).json({ error: `Truck ${truck.plate} does not belong to this transporter.` });
+  }
+  if (req.user.fleetOwnerId && driver.fleetOwnerId !== req.user.fleetOwnerId) {
+    return res.status(403).json({ error: `Driver ${driver.name} does not belong to this transporter.` });
   }
   if (truck.currentDriverId !== driverId) {
     return res.status(409).json({ error: `${driver.name} is not currently assigned to truck ${truck.plate}.` });

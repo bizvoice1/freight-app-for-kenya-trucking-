@@ -3,19 +3,13 @@ import { useAdminOps } from "./src/hooks/useAdminOps.js";
 import { INCIDENT_TYPES, INCIDENT_SEVERITY } from "./src/models/incident.js";
 import { COLORS as C_SHARED, FONT as FONT_SHARED, MONO as MONO_SHARED } from "./src/constants/theme.js";
 import { STATUS_MAP as STATUS_MAP_SHARED, RISK_MAP as RISK_MAP_SHARED, PRI_MAP as PRI_MAP_SHARED, SEV_MAP as SEV_MAP_SHARED } from "./src/constants/status.js";
-// Phase 3A of the seed-data unification — Admin's load list now comes from
-// the centralized pipeline (canonical SEED_LOADS + live postedLoads) instead
-// of its own private, independently-authored LOADS array. See
-// src/services/loadViews.js for the merge/formatting logic.
-import { getAllKnownLoads, toAdminLoadView } from "./src/services/loadViews.js";
-// Matching engine — pure model function + shared stats component
-import { scoreMatch } from "./src/models/match.js";
-import NetworkStats from "./src/components/matching/NetworkStats.jsx";
 // Phase 4G — real backend GPS (Phase 4F). Truck/driver names are resolved
 // from the frontend's own fleetService (still localStorage, per 4F/4G's
 // scope boundary — only the tracking trust boundary moved to the backend)
 // since the backend's Trip rows only carry ids.
 import { useAllLiveTrips } from "./src/hooks/useLiveTrip.js";
+import TripTrackingModal from "./src/components/tracking/TripTrackingModal.jsx";
+import { apiRequest } from "./src/services/backendSession.js";
 import { getTrucks, getDrivers } from "./src/services/fleetService.js";
 
 /* ── Design tokens — sourced from shared constants ───────────────────────── */
@@ -1566,187 +1560,136 @@ function BroadcastModal({ onClose, onLogAudit = ()=>{} }) {
   );
 }
 
-/* ── Phase 9: NETWORK COMMAND — the matching engine, made visible ────────── *
- * Per product direction: matching is the reason Behari exists, so admin must
- * see the network itself — available capacity, available cargo, potential
- * and made matches, and where the network is failing to connect (unmatched
- * trucks / unmatched cargo) — not just manually dispatch already-booked loads.
- */
-function corridorTownMatch(name, corridor) {
-  if (!name) return false;
-  const nl = name.toLowerCase();
-  return corridor.waypoints.some(w => nl.includes(w.label.split(",")[0].toLowerCase()));
-}
-
-/** Phase 4G.4 — live operations view over every backend-tracked trip. */
+/** Live operations view over every backend trip (GET /api/trips as admin). Read-only. */
 function AdminActiveTrips() {
   const { trips, loading, error } = useAllLiveTrips();
   const [fleet, setFleet] = useState({ trucks: [], drivers: [] });
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
-
-  useEffect(() => {
-    Promise.all([getTrucks(), getDrivers()]).then(([trucks, drivers]) => setFleet({ trucks, drivers }));
-  }, []);
-
-  function plateFor(truckId) { return fleet.trucks.find(t => t.id === truckId)?.plate || truckId; }
-  function nameFor(driverId) { return fleet.drivers.find(d => d.id === driverId)?.name || driverId; }
-
-  const rows = trips.map(({ trip, location }) => ({
-    trip, location,
-    plate: plateFor(trip.truckId),
-    driverName: nameFor(trip.driverId),
-  }));
-
+  const [tracking, setTracking] = useState(null);
+  useEffect(() => { Promise.all([getTrucks(), getDrivers()]).then(([trucks, drivers]) => setFleet({ trucks, drivers })).catch(()=>{}); }, []);
+  const plateFor = id => fleet.trucks.find(t => t.id === id)?.plate || id;
+  const nameFor = id => fleet.drivers.find(d => d.id === id)?.name || id;
+  const rows = trips.map(({ trip, location }) => ({ trip, location, plate: plateFor(trip.truckId), driverName: nameFor(trip.driverId) }));
   const statuses = ["All", ...new Set(rows.map(r => r.trip.status))];
   const q = query.trim().toLowerCase();
   const filtered = rows.filter(r => {
     if (statusFilter !== "All" && r.trip.status !== statusFilter) return false;
-    if (!q) return true;
-    const haystack = `${r.plate} ${r.driverName} ${r.trip.pickup} ${r.trip.delivery} ${r.trip.loadId} ${r.trip.id}`.toLowerCase();
-    return haystack.includes(q);
+    return !q || `${r.plate} ${r.driverName} ${r.trip.pickup} ${r.trip.delivery} ${r.trip.loadId} ${r.trip.id}`.toLowerCase().includes(q);
   });
-
   return (
     <>
-      <SectionHead label="Active Trips (Live)" color={C.green} />
+      <SectionHead label="Trips (live)" color={C.green} />
       <div style={{ display:"flex", gap:8, marginBottom:10 }}>
-        <input
-          value={query} onChange={e=>setQuery(e.target.value)} placeholder="Filter by truck, driver, route, trip…"
-          style={{ flex:1, padding:"9px 12px", fontSize:13, fontFamily:font, border:`1px solid ${C.border}`, borderRadius:8, outline:"none" }}
-        />
-        <select
-          value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}
-          style={{ padding:"9px 10px", fontSize:13, fontFamily:font, border:`1px solid ${C.border}`, borderRadius:8, outline:"none", background:C.white }}
-        >
+        <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Filter by truck, driver, route, trip…"
+          style={{ flex:1, padding:"9px 12px", fontSize:13, fontFamily:font, border:`1px solid ${C.border}`, borderRadius:8, outline:"none" }} />
+        <select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}
+          style={{ padding:"9px 10px", fontSize:13, fontFamily:font, border:`1px solid ${C.border}`, borderRadius:8, outline:"none", background:C.white }}>
           {statuses.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
       </div>
-
-      {loading && <div style={{ textAlign:"center", padding:16, color:C.muted, fontSize:13 }}>Loading live trips…</div>}
-      {error && <div style={{ ...card, padding:14, color:C.red, fontSize:13, marginBottom:16 }}>Live tracking backend unavailable: {error}</div>}
+      {loading && <div style={{ textAlign:"center", padding:16, color:C.muted, fontSize:13 }}>Loading trips…</div>}
+      {error && <div style={{ ...card, padding:14, color:C.red, fontSize:13, marginBottom:16 }}>Trips unavailable: {error}</div>}
       {!loading && !error && filtered.length === 0 && (
-        <div style={{ ...card, padding:20, textAlign:"center", color:C.muted, fontSize:13, marginBottom:16 }}>No trips match.</div>
+        <div style={{ ...card, padding:20, textAlign:"center", color:C.muted, fontSize:13, marginBottom:16 }}>No trips{rows.length ? " match" : " yet"}.</div>
       )}
       {!loading && filtered.map(({ trip, location, plate, driverName }) => {
         const ago = location ? Math.max(0, Math.round((Date.now() - new Date(location.timestamp).getTime())/1000)) : null;
         return (
-          <div key={trip.id} style={{ ...card, padding:"12px 14px", marginBottom:8, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div key={trip.id} data-testid={`admin-trip-${trip.id}`} onClick={() => setTracking({ trip, plate, driverName })}
+            style={{ ...card, padding:"12px 14px", marginBottom:8, display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer" }}>
             <div>
               <div style={{ fontSize:13, fontWeight:800, color:C.black }}>{plate} <span style={{ color:C.muted, fontWeight:600 }}>· {driverName}</span></div>
-              <div style={{ fontSize:11, color:C.secondary, marginTop:2 }}>{trip.pickup} → {trip.delivery} · Trip {trip.loadId || trip.id}</div>
+              <div style={{ fontSize:11, color:C.secondary, marginTop:2 }}>{trip.pickup} → {trip.delivery} · {trip.id}</div>
             </div>
             <div style={{ textAlign:"right" }}>
               <div style={{ fontSize:11, fontWeight:800, color:C.green }}>{trip.status}</div>
               <div style={{ fontSize:10, color:C.muted, marginTop:2 }}>
-                {location ? `${Math.round(location.speed||0)} km/h · ${ago<60?`${ago}s`:`${Math.round(ago/60)}m`} ago` : "no location yet"}
+                {location ? `${Math.round(location.speed||0)} km/h · ${ago<60?`${ago}s`:`${Math.round(ago/60)}m`} ago` : "Live location unavailable"}
               </div>
             </div>
           </div>
         );
       })}
-      <div style={{ height:16 }} />
+      {tracking && <TripTrackingModal trip={tracking.trip} role="admin" truckPlate={tracking.plate} driverName={tracking.driverName} onClose={() => setTracking(null)} />}
     </>
   );
 }
 
-function NetworkCommand({ networkStats = {}, truckAvailabilities = [], matchingCargoPool = [], onGetUnmatchedTrucks = ()=>Promise.resolve([]), onGetUnmatchedCargo = ()=>Promise.resolve([]), corridors = [] }) {
-  const [unmatchedTrucks, setUnmatchedTrucks] = useState([]);
-  const [unmatchedCargo,  setUnmatchedCargo]  = useState([]);
-  const [loading, setLoading] = useState(true);
-
+/** Read-only escrow + payout monitoring (GET /api/escrows, GET /api/payouts). No release/refund actions here. */
+function AdminMoneyMonitor() {
+  const [state, setState] = useState({ escrows: [], payouts: [], loading: true, error: null });
   useEffect(() => {
-    setLoading(true);
-    Promise.all([
-      onGetUnmatchedTrucks(matchingCargoPool),
-      onGetUnmatchedCargo(truckAvailabilities, matchingCargoPool),
-    ]).then(([ut, uc]) => { setUnmatchedTrucks(ut); setUnmatchedCargo(uc); setLoading(false); });
-  }, [truckAvailabilities.length, matchingCargoPool.length]); // eslint-disable-line
-
-  const corridorStats = corridors.map(cor => {
-    const trucksHere = truckAvailabilities.filter(t => corridorTownMatch(t.currentLocation?.name, cor) || corridorTownMatch(t.goingToward, cor));
-    const cargoHere  = matchingCargoPool.filter(c => corridorTownMatch(c.from, cor) || corridorTownMatch(c.to, cor));
-    let matches = 0;
-    trucksHere.forEach(t => cargoHere.forEach(c => { if (scoreMatch(t, c).matchScore >= 40) matches += 1; }));
-    return {
-      ...cor,
-      trucksHere: trucksHere.length,
-      cargoHere: cargoHere.length,
-      matches,
-      unmatched: trucksHere.filter(t => !cargoHere.some(c => scoreMatch(t, c).matchScore >= 40)).length
-               + cargoHere.filter(c => !trucksHere.some(t => scoreMatch(t, c).matchScore >= 40)).length,
-    };
-  });
-
+    let off = false;
+    async function load() {
+      try {
+        const [e, p] = await Promise.all([apiRequest("admin", "GET", "/api/escrows"), apiRequest("admin", "GET", "/api/payouts")]);
+        if (e.status !== 200 || p.status !== 200) throw new Error(e.json?.error || p.json?.error || `HTTP ${e.status}/${p.status}`);
+        if (!off) setState({ escrows: e.json, payouts: p.json, loading: false, error: null });
+      } catch (err) { if (!off) setState(s => ({ ...s, loading: false, error: err.message })); }
+    }
+    load();
+    const id = setInterval(load, 15000);
+    return () => { off = true; clearInterval(id); };
+  }, []);
+  const row = (k, v) => <div style={{ fontSize:11, color:C.muted }}>{k}: <span style={{ color:C.black, fontWeight:600 }}>{v ?? "—"}</span></div>;
+  const kes = n => Number.isFinite(Number(n)) ? `KSh ${Number(n).toLocaleString("en-KE")}` : "—";
   return (
     <>
-      <AdminActiveTrips />
-
-      <NetworkStats stats={networkStats} />
-      <div style={{ height:16 }} />
-
-      <SectionHead label="Corridor Intelligence" />
-      <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:18 }}>
-        {corridorStats.map(cor => (
-          <div key={cor.id} style={{ ...card, padding:"12px 14px" }}>
-            <div style={{ fontSize:13, fontWeight:800, color:C.black, marginBottom:8 }}>{cor.name}</div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:6 }}>
-              {[["Trucks",cor.trucksHere,C.blue],["Cargo",cor.cargoHere,C.amber],["Matches",cor.matches,C.green],["Unmatched",cor.unmatched,C.red]].map(([l,v,c]) => (
-                <div key={l} style={{ textAlign:"center" }}>
-                  <div style={{ fontSize:17, fontWeight:900, color:c }}>{v}</div>
-                  <div style={{ fontSize:9, color:C.muted, fontWeight:700, textTransform:"uppercase", letterSpacing:0.4 }}>{l}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <SectionHead label="Unmatched Truck Capacity" color={C.amber} />
-      {loading && <div style={{ textAlign:"center", padding:20, color:C.muted, fontSize:13 }}>Scoring the network…</div>}
-      {!loading && unmatchedTrucks.length === 0 && (
-        <div style={{ ...card, padding:24, textAlign:"center", color:C.muted, fontSize:13, marginBottom:16 }}>Every declared truck has a compatible match right now.</div>
-      )}
-      {!loading && unmatchedTrucks.map(t => (
-        <div key={t.id} style={{ ...card, padding:"12px 14px", marginBottom:8 }}>
-          <div style={{ fontSize:13, fontWeight:700, color:C.black }}>{t.plate} · {t.truckType}</div>
-          <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>
-            {t.currentLocation?.name || "—"} → {t.goingToward || "—"} · {t.capacity || "—"} · max detour {t.maxDetourKm}km
-          </div>
+      {state.loading && <div style={{ textAlign:"center", padding:16, color:C.muted, fontSize:13 }}>Loading…</div>}
+      {state.error && <div style={{ ...card, padding:14, color:C.red, fontSize:13, marginBottom:16 }}>Unavailable: {state.error}</div>}
+      <SectionHead label={`Escrows (${state.escrows.length})`} />
+      {!state.loading && !state.error && state.escrows.length === 0 && <div style={{ ...card, padding:16, textAlign:"center", color:C.muted, fontSize:13, marginBottom:12 }}>No escrows yet.</div>}
+      {state.escrows.map(e => (
+        <div key={e.id} data-testid={`escrow-${e.id}`} style={{ ...card, padding:"12px 14px", marginBottom:8 }}>
+          <div style={{ display:"flex", justifyContent:"space-between" }}><b style={{ fontSize:13 }}>{e.id}</b><span style={{ fontSize:11, fontWeight:800 }}>{e.status}</span></div>
+          {row("Booking", e.bookingId)}{row("Amount", kes(e.amount))}
         </div>
       ))}
-
-      <div style={{ height:8 }} />
-      <SectionHead label="Unmatched Cargo" color={C.red} />
-      {!loading && unmatchedCargo.length === 0 && (
-        <div style={{ ...card, padding:24, textAlign:"center", color:C.muted, fontSize:13 }}>Every open cargo item has a compatible truck right now.</div>
-      )}
-      {!loading && unmatchedCargo.map(c => (
-        <div key={c.id} style={{ ...card, padding:"12px 14px", marginBottom:8 }}>
-          <div style={{ fontSize:13, fontWeight:700, color:C.black }}>{c.cargo} · {c.from} → {c.to}</div>
-          <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>
-            {c.weight || "—"} · needs {c.truck || "Any"} · KSh {(c.pay || 0).toLocaleString()}
-          </div>
+      <SectionHead label={`Payouts (${state.payouts.length})`} />
+      {!state.loading && !state.error && state.payouts.length === 0 && <div style={{ ...card, padding:16, textAlign:"center", color:C.muted, fontSize:13, marginBottom:12 }}>No payouts yet.</div>}
+      {state.payouts.map(p => (
+        <div key={p.id} data-testid={`payout-${p.id}`} style={{ ...card, padding:"12px 14px", marginBottom:8 }}>
+          <div style={{ display:"flex", justifyContent:"space-between" }}><b style={{ fontSize:13 }}>{p.id}</b><span style={{ fontSize:11, fontWeight:800 }}>{p.status}</span></div>
+          {row("Escrow", p.escrowId)}{row("Amount", kes(p.amount))}
         </div>
       ))}
     </>
   );
 }
 
-/* ── Tab definitions ─────────────────────────────────────────────────────── */
-const PAGES = [
-  { id:"command",   label:"Command"   },
-  { id:"network",   label:"Network"   },
-  { id:"heatmap",   label:"Heatmap"   },
-  { id:"risk",      label:"Risk"      },
-  { id:"treasury",  label:"Treasury"  },
-  { id:"dispatch",  label:"Dispatch"  },
-  { id:"incidents", label:"Incidents" },
-  { id:"audit",     label:"Audit"     },
-  { id:"kyc",       label:"KYC",      badge:4 },
-  { id:"disputes",  label:"Disputes", badge:3 },
-  { id:"fraud",     label:"Fraud"     },
+/* ── Tab definitions (5P-3: only backend-real pages are enabled) ───────── */
+const PAGES = [{ id:"trips", label:"Live Trips" }, { id:"money", label:"Escrow & Payouts" }, { id:"status", label:"Status" }];
+const NOT_LIVE = [
+  ["Command Center / GMV / Health", "Figures were simulated; no admin metrics endpoint yet"],
+  ["National Heatmap", "No fleet-position feed for admin yet"],
+  ["Risk Center", "No risk scoring backend"],
+  ["Treasury / Payout freeze", "No admin treasury backend (money controls stay in the backend gate)"],
+  ["Dispatch Center", "Admin dispatch has no backend"],
+  ["Incidents", "No incident backend"],
+  ["Audit log", "Local-only log; backend audit view not built"],
+  ["KYC", "KYC is out of scope for the pilot"],
+  ["Disputes", "No dispute backend"],
+  ["Fraud flags", "No fraud backend"],
+  ["Broadcast alerts", "No broadcast backend"],
 ];
+
+function NotLivePanel() {
+  return (
+    <>
+      <div style={{ ...card, padding:16, marginBottom:12 }}>
+        <div style={{ fontSize:14, fontWeight:800, marginBottom:4 }}>Admin console is read-only</div>
+        <div style={{ fontSize:12, color:C.muted }}>Operational data lives in the backend. The sections below are disabled until they are backed by real APIs; nothing here is simulated.</div>
+      </div>
+      {NOT_LIVE.map(([name, why]) => (
+        <div key={name} data-testid="admin-not-live" style={{ ...card, padding:"12px 14px", marginBottom:6, opacity:0.65 }}>
+          <div style={{ fontSize:13, fontWeight:700 }}>{name} <span style={{ fontSize:10, color:C.muted, fontWeight:700 }}>· NOT LIVE</span></div>
+          <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>{why}</div>
+        </div>
+      ))}
+    </>
+  );
+}
 
 /* ── ROOT ────────────────────────────────────────────────────────────────── */
 export default function BehariAdmin({
@@ -1758,22 +1701,14 @@ export default function BehariAdmin({
   milestones = {},
   // Dark mode (lifted to App.jsx — uniform across all portals)
   darkMode = false, toggleDark = ()=>{},
-  // Matching engine (Truck ↔ Cargo) — see hooks/useMatching.js
-  truckAvailabilities = [], matchingCargoPool = [], networkStats = {},
-  onGetUnmatchedTrucks = ()=>Promise.resolve([]), onGetUnmatchedCargo = ()=>Promise.resolve([]),
 }) {
-  const [page, setPage]             = useState("command");
-  const [showBroadcast, setShowBroadcast] = useState(false); // Feature 29
+  const [page, setPage]             = useState("trips");
 
   // Admin-only state — never touches App.jsx
   const adminOps = useAdminOps();
 
-  // Phase 3A — canonical load list for admin view, sourced entirely from the
-  // centralized pipeline (SEED_LOADS + live postedLoads, deduplicated, with
-  // loadStatuses overrides already applied) instead of a private admin-only
-  // array. toAdminLoadView() adds the "route" string + booking-aware driver
-  // field this file's components already expect — no other prop shape changed.
-  const allAdminLoads = getAllKnownLoads().map(l => toAdminLoadView(l, notifications));
+  // 5P-2: no admin backend feed for loads yet (5P-4) — empty, never seeded.
+  const allAdminLoads = [];
 
   // Derived metrics for health + alerts
   const openDisputeCount = Object.values(disputes).filter(d => d.status !== "Resolved").length;
@@ -1816,10 +1751,7 @@ export default function BehariAdmin({
             <button onClick={toggleDark} title={darkMode?"Switch to light mode":"Switch to dark mode"} style={{ background:"none", border:`1px solid transparent`, borderRadius:8, width:36, height:36, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", fontSize:18, flexShrink:0 }}>
               {darkMode ? "☀️" : "🌙"}
             </button>
-            {/* Feature 29 — Broadcast alert button */}
-            <button onClick={()=>setShowBroadcast(true)} style={{ background:C.amberBg, color:C.amber, border:`1px solid ${C.amber}44`, borderRadius:8, padding:"5px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:font }}>
-              📢 Alert
-            </button>
+            
             <div style={{ fontSize:11, fontWeight:600, color:C.muted }}>{new Date().toLocaleDateString("en-KE",{ day:"numeric",month:"short" })}</div>
           </div>
         </div>
@@ -1850,26 +1782,13 @@ export default function BehariAdmin({
       <div style={{ padding:"12px 12px 48px", maxWidth:720, margin:"0 auto" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
           <div style={{ fontSize:20, fontWeight:800, color:C.black, letterSpacing:-0.4 }}>{currentPage?.label}</div>
-          <div style={{ fontSize:11, fontWeight:600, color:C.muted }}>Admin · Nairobi HQ</div>
+          <div style={{ fontSize:11, fontWeight:600, color:C.muted }}>Admin · read-only</div>
         </div>
 
-        {page === "command"   && <CommandCenter allLoads={allAdminLoads} healthScore={adminOps.healthScore} networkAlerts={adminOps.networkAlerts} auditLog={adminOps.auditLog} corridors={adminOps.corridors} adminOps={adminOps} />}
-        {page === "network"   && <NetworkCommand networkStats={networkStats} truckAvailabilities={truckAvailabilities} matchingCargoPool={matchingCargoPool} onGetUnmatchedTrucks={onGetUnmatchedTrucks} onGetUnmatchedCargo={onGetUnmatchedCargo} corridors={adminOps.corridors} />}
-        {page === "heatmap"   && <NationalHeatmap allLoads={allAdminLoads} corridors={adminOps.corridors} onForceStatus={onAdminForceStatus} onCancelShipment={onCancelShipment} adminOps={adminOps} />}
-        {page === "risk"      && <RiskCenter carrierRiskProfiles={adminOps.carrierRiskProfiles} shipperRiskProfiles={adminOps.shipperRiskProfiles} carrierRoster={adminOps.carrierRoster} />}
-        {page === "treasury"  && <Treasury escrowData={escrowData} frozenPayouts={adminOps.frozenPayouts} frozenPayoutsReason={adminOps.frozenPayoutsReason} onFreezePayouts={adminOps.freezePayouts} onUnfreezePayouts={adminOps.unfreezePayouts} allLoads={allAdminLoads} onReleaseEscrow={onReleaseEscrow} />}
-        {page === "dispatch"  && <DispatchCenter allLoads={allAdminLoads} carrierRoster={adminOps.carrierRoster} adminOps={adminOps} />}
-        {page === "incidents" && <IncidentCenter incidents={adminOps.incidents} adminOps={adminOps} />}
-        {page === "audit"     && <AuditCenter auditLog={adminOps.auditLog} />}
-        {page === "kyc"       && <Kyc />}
-        {page === "disputes"  && <Disputes liveDisputes={disputes} escrowData={escrowData} onClose={onCloseDispute} onRelease={onReleaseEscrow} onRefund={onRefundEscrow} />}
-        {page === "fraud"     && <FraudFlags fraudFlags={fraudFlags} onFlagFraud={onFlagFraud} onResolveFraudFlag={onResolveFraudFlag} />}
+        {page === "trips" && <AdminActiveTrips />}
+        {page === "money" && <AdminMoneyMonitor />}
+        {page === "status" && <NotLivePanel />}
       </div>
-
-      {/* Feature 29 — Broadcast alert modal */}
-      {showBroadcast && (
-        <BroadcastModal onClose={()=>setShowBroadcast(false)} onLogAudit={adminOps.logAudit} />
-      )}
     </div>
   );
 }

@@ -271,27 +271,14 @@ export function buildTripSnapshot(load) {
  * engine, new driver.
  */
 
-const GPS_STORE_KEY = "behari_gps_v1";
 
 const _gpsStore = {
   locationUpdates: [],     // flat list, all trips — filtered per-trip by the getters below
   progressByTrip:  {},     // tripId -> last computed progress %, so IN_TRANSIT can advance tick over tick
 };
 
-function _persistGps() {
-  try { localStorage.setItem(GPS_STORE_KEY, JSON.stringify(_gpsStore)); } catch { /* ignore */ }
-}
-
-function _hydrateGps() {
-  try {
-    const raw = localStorage.getItem(GPS_STORE_KEY);
-    if (!raw) return;
-    const saved = JSON.parse(raw);
-    if (saved.locationUpdates) _gpsStore.locationUpdates = saved.locationUpdates;
-    if (saved.progressByTrip)  _gpsStore.progressByTrip  = saved.progressByTrip;
-  } catch { /* corrupted storage — start fresh */ }
-}
-_hydrateGps();
+/* 5P-2: in-memory only; never persisted. */
+function _persistGps() {}
 
 /**
  * Maps a Trip's status onto a route-progress percentage. This is the direct
@@ -409,40 +396,6 @@ export function getLocationHistory(tripId) {
 /* ── Auto-ticking (optional convenience — the acceptance tests exercise
  *    generateLocationUpdate() directly for determinism; these wrap it in a
  *    real interval for actual runtime use once wired into a hook/UI) ────── */
-
-const _simIntervals = new Map(); // tripId -> interval handle; runtime-only, never persisted
-
-/**
- * Starts auto-generating LocationUpdates for a trip every `intervalMs`.
- * Fetches the trip fresh on each tick (via tripService, read-only) so it
- * always reflects the trip's current status, and self-stops the moment
- * that trip is gone or has reached a terminal state.
- *
- * Lazily imports tripService to avoid a hard circular-import edge at module
- * load time — gpsService is otherwise independent of the trip layer.
- */
-export function startSimulation(tripId, intervalMs = 4000) {
-  stopSimulation(tripId);
-  const handle = setInterval(async () => {
-    const { getTripById } = await import("./tripService.js");
-    const trip = await getTripById(tripId);
-    if (!trip || TERMINAL_TRIP_STATUSES.has(trip.status)) {
-      stopSimulation(tripId);
-      return;
-    }
-    generateLocationUpdate(trip);
-  }, intervalMs);
-  _simIntervals.set(tripId, handle);
-}
-
-/** Stops auto-ticking for a trip. Safe to call even if nothing is running. */
-export function stopSimulation(tripId) {
-  const handle = _simIntervals.get(tripId);
-  if (handle) {
-    clearInterval(handle);
-    _simIntervals.delete(tripId);
-  }
-}
 
 /* ════════════════════════════════════════════════════════════════════════
  * PHASE 4E — Device-sourced locations (real driver-phone GPS)

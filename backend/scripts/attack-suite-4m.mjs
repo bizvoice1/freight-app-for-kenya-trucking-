@@ -8,6 +8,7 @@
 // section at the bottom for a pointer to those, so there are never two
 // copies of the same assertion silently drifting apart.
 import jwt from "jsonwebtoken";
+import { driveSteps } from "./gate-helper.mjs";
 import Database from "better-sqlite3";
 import { NBO_NKU } from "./fixtures.mjs";
 import { fileURLToPath } from "node:url";
@@ -301,10 +302,7 @@ async function main() {
     const trip = await api(james.token, "POST", `/api/bookings/${accept.json.id}/create-trip`, {});
     assert(trip.json?.id, `setup: create-trip failed: ${JSON.stringify(trip.json)}`);
     try {
-      for (const status of ["Dispatched", "At Pickup", "Loading", "In Transit"]) {
-        const r = await api(peterDriver.token, "POST", `/api/trips/${trip.json.id}/status`, { status });
-        assert(r.status === 200, `setup: driver step ${status} failed: ${JSON.stringify(r.json)}`);
-      }
+      await driveSteps({ tripId: trip.json.id, driverToken: peterDriver.token, statuses: ["Dispatched", "At Pickup", "Loading", "In Transit"] });
       const backward = await api(admin.token, "POST", `/api/trips/${trip.json.id}/status`, { status: "Dispatched" });
       assert(backward.status === 409, `expected 409 for a backward transition, got ${backward.status}`);
     } finally {

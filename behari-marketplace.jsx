@@ -116,7 +116,7 @@ function MarketplaceLogin({ onLoggedIn, onExitMainSite }) {
 
       <form onSubmit={handleLogin}>
         <label style={labelStyle}>Phone</label>
-        <input value={phone} onChange={e=>setPhone(e.target.value)} placeholder={role==="shipper"?"0700000001":"0722100200"} inputMode="tel" style={inputStyle} />
+        <input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="07XX XXX XXX" inputMode="tel" style={inputStyle} />
         <label style={labelStyle}>PIN</label>
         <input value={pin} onChange={e=>setPin(e.target.value)} placeholder="••••" type="password" inputMode="numeric" style={{ ...inputStyle, letterSpacing:4 }} />
         {error && <div style={{ background:C.redBg, color:C.red, fontSize:13, borderRadius:8, padding:"10px 12px", marginBottom:16 }}>{error}</div>}

@@ -230,7 +230,7 @@ async function main() {
   // ── R7 ─────────────────────────────────────────────────────────────────
   await test("R7: Haversine appears only in allow-listed proximity/GPS-sanity files, never in pricing or display code", async () => {
     const root = path.join(backendDir, "..");
-    const allow = new Set(["src/models/match.js", "src/models/trip.js", "backend/src/services/routeCodec.js", "backend/src/services/loadView.js", /* proximity trimming only */ "src/models/geo.js", /* only names the legacy "haversine" distSource tag it refuses to display */ "backend/scripts/mock-routes-server.mjs", "backend/scripts/acceptance-5c3.mjs"]);
+    const allow = new Set(["src/models/match.js", "src/models/trip.js", "backend/src/services/routeCodec.js", "backend/src/services/loadView.js", /* proximity trimming only */ "src/models/geo.js", /* only names the legacy "haversine" distSource tag it refuses to display */ "backend/scripts/mock-routes-server.mjs", "backend/scripts/acceptance-5c3.mjs", /* 5E soft geofence: gate-site proximity evidence only, never pricing */ "backend/src/domain/gate.js"]);
     const hits = [];
     const walk = (dir) => {
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

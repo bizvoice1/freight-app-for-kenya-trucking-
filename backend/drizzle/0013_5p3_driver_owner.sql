@@ -1,0 +1,1 @@
+ALTER TABLE `drivers` ADD `fleet_owner_id` text;
