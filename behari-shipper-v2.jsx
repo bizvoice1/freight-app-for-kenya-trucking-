@@ -7,13 +7,16 @@ import { CORRIDORS, CARGO_TYPES, TRUCK_TYPES, CARGO_UNITS, TRUCK_COUNT_OPTIONS }
 // arrays. See src/services/loadViews.js for the merge/formatting logic.
 // data/shipments.js itself is left untouched (not yet deleted).
 import { getAllKnownLoads, toShipperShipmentView } from "./src/services/loadViews.js";
-import { sortNewestFirst, makePlace, resolveDistance, distLabel, decodePolyline } from "./src/models/geo.js";
+import { sortNewestFirst, makePlace, resolveDistance, distLabel, decodePolyline, metersToKm } from "./src/models/geo.js";
 import PlaceInput from "./src/components/maps/PlaceInput.jsx";
 import GoogleMap from "./src/components/maps/GoogleMap.jsx";
 import { hasMapsKey } from "./src/services/googleMaps.js";
 // Step 8: Rating dimensions
 import { CARRIER_RATING_DIMS } from "./src/models/rating.js";
 // Matching engine — shared UI components (Truck ↔ Cargo)
+import { useCommerce } from "./src/hooks/useCommerce.js";
+import { OfferThread, AgreedPriceBlock, CommerceBell, DemoBadge } from "./src/components/negotiation/negotiation.jsx";
+import { ksh } from "./src/models/backendLoad.js";
 import MatchCard from "./src/components/matching/MatchCard.jsx";
 import NearbyList from "./src/components/matching/NearbyList.jsx";
 // Phase 4G — real backend GPS (Phase 4F), distinct from the simulated map
@@ -58,7 +61,7 @@ const STATUS_MAP = {
 // component that merged SHIPMENTS_SEED locally.
 
 // 5D-1: for a backend-linked load no money is held, so the local "Escrow Held" status reads "Open".
-const statusLabel = (load) => (load.backendLoadId && load.status === "Escrow Held" ? "Open" : load.status);
+const statusLabel = (load) => (load.isBackend && load.status === "Escrow Held" ? "Open" : load.status);
 
 function Pill({ status, label }) {
   const s = STATUS_MAP[status] || { color:C.muted, bg:C.bg };
@@ -78,6 +81,7 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
   const [step,        setStep]        = useState(1);
   const [escrowState, setEscrowState] = useState("idle"); // idle | matching | posted
   const [createdLoad,   setCreatedLoad]   = useState(null);
+  const [postError,     setPostError]     = useState(null);
   const [matchesFound,  setMatchesFound]  = useState([]);
   const [loadingMatches,setLoadingMatches]= useState(false);
   const [form, setForm] = useState({
@@ -85,7 +89,6 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
     pickupPlace:null, deliveryPlace:null, 
     weight:"", unit:"Tonnes", truckType:"", truckCount:"1", pickupDate:"", deadline:"", penalty:"", budget:"", phone:"+254 7",
     recurring:false, recurFreq:"weekly",
-    auctionMode:false, // Feature 10
     partialLoadAllowed:false, // Matching engine — partial-load compatibility
   });
 
@@ -116,7 +119,10 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
    * engine against declared truck availabilities — "MATCHING TRUCKS" — before
    * falling through to the existing success screen. */
   async function finalizePost() {
-    const newLoad = await onPostLoad(form);
+    setPostError(null);
+    let newLoad;
+    try { newLoad = await onPostLoad(form); }
+    catch (e) { setPostError(e?.message || "Could not post cargo."); return; }
     setCreatedLoad(newLoad);
     setEscrowState("matching");
     setLoadingMatches(true);
@@ -324,27 +330,6 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
             )}
           </div>
 
-          {/* Feature 10 — Auction / bidding mode toggle */}
-          <div style={{ background:form.auctionMode?"#FFF7ED":C.bg,border:`1.5px solid ${form.auctionMode?C.amber:C.border}`,borderRadius:10,padding:"13px 14px",marginBottom:16,transition:"all 0.15s" }}>
-            <label style={{ display:"flex",alignItems:"center",gap:12,cursor:"pointer" }}>
-              <div
-                onClick={()=>set("auctionMode",!form.auctionMode)}
-                style={{ width:42,height:24,borderRadius:12,background:form.auctionMode?C.amber:C.border,position:"relative",flexShrink:0,transition:"background 0.2s",cursor:"pointer" }}
-              >
-                <div style={{ width:18,height:18,borderRadius:"50%",background:C.white,position:"absolute",top:3,left:form.auctionMode?21:3,transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)" }} />
-              </div>
-              <div>
-                <div style={{ fontSize:14,fontWeight:700,color:C.black }}>Open to bids (Auction mode)</div>
-                <div style={{ fontSize:11,color:C.muted,marginTop:1 }}>Transporters compete — you pick the best offer</div>
-              </div>
-            </label>
-            {form.auctionMode && (
-              <div style={{ marginTop:10,background:C.amberBg,borderRadius:8,padding:"8px 12px",fontSize:12,color:C.amber,fontWeight:600 }}>
-                🏷 Your budget of KSh {budgetNum>0?budgetNum.toLocaleString():"—"} is the ceiling. Transporters bid below it. Lowest bid wins.
-              </div>
-            )}
-          </div>
-
           {/* Matching engine — partial-load toggle */}
           <div
             onClick={()=>set("partialLoadAllowed",!form.partialLoadAllowed)}
@@ -406,6 +391,7 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
           {escrowState==="idle" && <>
             <label style={lbl}>Contact Phone</label>
             <input style={inp} placeholder="+254 7XX XXX XXX" value={form.phone} onChange={e=>set("phone",e.target.value)} />
+            {postError && <div data-testid="post-error" style={{ background:C.redBg,color:C.red,borderRadius:8,padding:"10px 12px",fontSize:12,fontWeight:700,marginBottom:10 }}>{postError}</div>}
             <div style={{ display:"flex",gap:8 }}>
               <button onClick={()=>setStep(1)} style={{ flex:1,background:C.bg,color:C.black,border:`1px solid ${C.border}`,borderRadius:8,padding:13,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font }}>
                 ← Back
@@ -816,7 +802,33 @@ function EscrowReleasePanel({ s, escrow, onRelease, onClose }) {
 }
 
 /* ── SHIPMENT DETAIL ────────────────────────────────────── */
-function DetailModal({ s, onClose, onConfirmDelivery = ()=>{}, escrowData = {}, bookingSlots = {}, onOpenDispute = ()=>{}, onSubmitRating = ()=>{}, truckAvailabilities = [], onFindMatchesForCargo = ()=>Promise.resolve([]) }) {
+/* ── 5D-3 backend negotiation panel (shipper) ───────────── */
+function ShipperCommercePanel({ s, commerce }) {
+  const booking = commerce.bookings.find(b => b.loadId === s.id);
+  const threads = commerce.threads[s.id] || [];
+  const A = commerce.actions;
+  if (booking) return (
+    <div style={{ marginBottom:16 }}>
+      <div style={{ fontSize:11,fontWeight:700,color:C.muted,letterSpacing:0.8,textTransform:"uppercase",marginBottom:8 }}>Booking</div>
+      <AgreedPriceBlock booking={booking} load={{ price:s.pay }} />
+    </div>
+  );
+  return (
+    <div style={{ marginBottom:16 }} data-testid="shipper-offers">
+      <div style={{ fontSize:11,fontWeight:700,color:C.muted,letterSpacing:0.8,textTransform:"uppercase" }}>Offers ({threads.length})</div>
+      <div style={{ fontSize:12,color:C.secondary,marginTop:4 }}>Posted price {ksh(s.pay)}. You choose — Behari never auto-selects an offer.</div>
+      {threads.length === 0 && <div style={{ fontSize:12,color:C.muted,padding:"14px 0",textAlign:"center" }}>No offers yet — transporters can accept your posted price or make an offer.</div>}
+      {threads.map(t => (
+        <OfferThread key={t.key} thread={{ ...t, title:t.transporterName || "Transporter" }}
+          partyLabel={() => t.transporterName || "Transporter"}
+          highlight={t.latest.needsMyAction}
+          onAccept={A.accept} onCounter={A.counter} onReject={A.reject} onWithdraw={A.withdraw} />
+      ))}
+    </div>
+  );
+}
+
+function DetailModal({ s, commerce, onClose, onConfirmDelivery = ()=>{}, escrowData = {}, bookingSlots = {}, onOpenDispute = ()=>{}, onSubmitRating = ()=>{}, truckAvailabilities = [], onFindMatchesForCargo = ()=>Promise.resolve([]) }) {
   const [deliveryFlow,   setDeliveryFlow]   = useState(false);
   const [showDispute,    setShowDispute]    = useState(false);
   const [showRate,       setShowRate]       = useState(false);
@@ -828,11 +840,6 @@ function DetailModal({ s, onClose, onConfirmDelivery = ()=>{}, escrowData = {}, 
   // Matching engine — Nearby Trucks for cargo still awaiting a carrier
   const [nearbyTrucks,   setNearbyTrucks]   = useState(null);
   const [loadingNearby,  setLoadingNearby]  = useState(false);
-
-  // Read bids from localStorage for this load
-  const [bids, setBids] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(`behari_bids_${s.id}`) || "[]"); } catch { return []; }
-  });
 
   const escrow  = escrowData[s.id];
   const slots   = bookingSlots[s.id] || [];
@@ -940,73 +947,17 @@ function DetailModal({ s, onClose, onConfirmDelivery = ()=>{}, escrowData = {}, 
           </button>
         </div>
 
-        {/* 5D-1 — negotiation will attach here; demo loads have no backend record */}
-        {!isDelivered && !s.backendLoadId && (
-          <div data-testid="demo-load-note" style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",marginBottom:16,fontSize:12,color:C.muted,fontWeight:600 }}>
-            Demo load — negotiation unavailable
-          </div>
-        )}
-        {!isDelivered && s.backendLoadId && (
-          <div data-testid="linked-load-note" style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",marginBottom:16,fontSize:12,color:C.secondary,fontWeight:600 }}>
-            Commercial record linked · {s.backendLoadId}
-          </div>
-        )}
-
-        {/* Feature 10 — Auction / bid panel */}
-        {s.auctionMode && (
-          <div style={{ background:"#FFF7ED",border:`1px solid ${C.amber}`,borderRadius:12,padding:"12px 14px",marginBottom:16 }}>
-            <div style={{ fontSize:13,fontWeight:800,color:C.amber,marginBottom:2 }}>🏷 Auction Mode — Open for Bids</div>
-            <div style={{ fontSize:11,color:C.amber,opacity:0.75,marginBottom:10 }}>Budget ceiling: KSh {s.pay.toLocaleString()} · Lowest bid wins</div>
-            {bids.length === 0 && (
-              <div style={{ fontSize:12,color:C.muted,padding:"12px 0",textAlign:"center" }}>No bids yet — waiting for transporters to bid</div>
-            )}
-            {bids.map((bid,i)=>(
-              <div key={i} style={{ background:C.white,borderRadius:8,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center",border:`1px solid ${i===0?C.green:C.border}` }}>
-                <div>
-                  {i===0 && <div style={{ fontSize:9,fontWeight:800,color:C.green,textTransform:"uppercase",letterSpacing:0.8,marginBottom:2 }}>🏆 Lowest Bid</div>}
-                  <div style={{ fontSize:13,fontWeight:700,color:C.black }}>{bid.carrier}</div>
-                  <div style={{ fontSize:11,color:C.muted }}>{bid.plate} · {bid.time}</div>
-                </div>
-                <div style={{ textAlign:"right" }}>
-                  <div style={{ fontSize:15,fontWeight:800,color:i===0?C.green:C.amber }}>KSh {bid.amount.toLocaleString()}</div>
-                  <div style={{ display:"flex",gap:6,marginTop:4 }}>
-                    <button onClick={()=>{ const next=bids.filter((_,j)=>j!==i); setBids(next); localStorage.setItem(`behari_bids_${s.id}`,JSON.stringify(next)); }} style={{ background:C.redBg,color:C.red,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:font }}>✕</button>
-                    <button onClick={()=>{ const next=bids.filter((_,j)=>j!==i); setBids(next); localStorage.setItem(`behari_bids_${s.id}`,JSON.stringify(next)); }} style={{ background:C.green,color:C.black,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:font }}>Award →</button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        {/* Counter-offer bids from carriers (non-auction loads) */}
-        {!s.auctionMode && bids.length > 0 && (
-          <div style={{ background:C.amberBg,border:`1px solid ${C.amber}`,borderRadius:12,padding:"12px 14px",marginBottom:16 }}>
-            <div style={{ fontSize:11,fontWeight:700,color:C.amber,letterSpacing:0.8,textTransform:"uppercase",marginBottom:10 }}>
-              💸 Transporter Counter-offers ({bids.length})
-            </div>
-            {bids.map((bid,i) => (
-              <div key={i} style={{ background:C.white,borderRadius:8,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                <div>
-                  <div style={{ fontSize:13,fontWeight:700,color:C.black }}>{bid.carrier}</div>
-                  <div style={{ fontSize:11,color:C.muted }}>{bid.plate} · {bid.time}</div>
-                </div>
-                <div style={{ textAlign:"right" }}>
-                  <div style={{ fontSize:15,fontWeight:800,color:C.amber }}>KSh {bid.amount.toLocaleString()}</div>
-                  <div style={{ display:"flex",gap:6,marginTop:4 }}>
-                    <button onClick={()=>{ const next=bids.filter((_,j)=>j!==i); setBids(next); localStorage.setItem(`behari_bids_${s.id}`,JSON.stringify(next)); }} style={{ background:C.redBg,color:C.red,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:font }}>Decline</button>
-                    <button onClick={()=>{ const next=bids.filter((_,j)=>j!==i); setBids(next); localStorage.setItem(`behari_bids_${s.id}`,JSON.stringify(next)); }} style={{ background:C.green,color:C.black,border:"none",borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:font }}>Accept</button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+        {/* 5D-3 — real backend negotiation; demo loads have no commercial record */}
+        {s.isDemo && <div style={{ marginBottom:16 }}><DemoBadge /></div>}
+        {s.isBackend && (
+          <ShipperCommercePanel s={s} commerce={commerce} />
         )}
 
         {/* Multi-truck fulfillment panel (Step 5) */}
         {s.truckCount > 1 && <MultiTruckPanel slots={slots} truckCount={s.truckCount || 1} />}
 
         {/* Escrow status banner */}
-        {escrow && !s.backendLoadId && (
+        {escrow && !s.isBackend && (
           <div style={{ background: isReadyForRelease?C.greenBg:C.amberBg, borderRadius:8, padding:"10px 14px", marginBottom:16, fontSize:12, fontWeight:600, color: isReadyForRelease?C.green:C.amber }}>
             🔒 Escrow: {escrow.status} · KSh {s.pay.toLocaleString()}
           </div>
@@ -1373,14 +1324,13 @@ function Shipments({ onDetail, allShipments = [] }) {
   // component — see Dashboard's comment above for why no local merge is
   // needed here anymore.
   /* Feature 24 — recurring filter */
-  const [shipFilter, setShipFilter] = useState("All"); // "All" | "Recurring" | "Auction"
+  const [shipFilter, setShipFilter] = useState("All"); // "All" | "Recurring"
   const [manageScheduleId, setManageScheduleId] = useState(null);
 
   const recurringLoads = allShipments.filter(s => s.recurring);
 
   const displayed = allShipments.filter(s => {
     if (shipFilter === "Recurring") return s.recurring;
-    if (shipFilter === "Auction")   return s.auctionMode;
     return true;
   });
 
@@ -1389,7 +1339,7 @@ function Shipments({ onDetail, allShipments = [] }) {
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
         <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase" }}>All Shipments</div>
         <div style={{ display:"flex",gap:5 }}>
-          {["All","Recurring","Auction"].map(f=>(
+          {["All","Recurring"].map(f=>(
             <button key={f} onClick={()=>setShipFilter(f)} style={{ background:shipFilter===f?C.black:C.bg, color:shipFilter===f?C.white:C.secondary, border:`1px solid ${shipFilter===f?C.black:C.border}`, borderRadius:100, padding:"4px 10px", fontSize:10, fontWeight:700, cursor:"pointer", fontFamily:font }}>{f}</button>
           ))}
         </div>
@@ -1428,7 +1378,6 @@ function Shipments({ onDetail, allShipments = [] }) {
               <span style={{ fontSize:11,color:C.muted }}>{s.id}</span>
               <Pill status={s.status} label={statusLabel(s)} />
               {s.recurring && <span style={{ background:C.amberBg,color:C.amber,fontSize:9,fontWeight:700,borderRadius:100,padding:"2px 6px" }}>♻ REPEAT</span>}
-              {s.auctionMode && <span style={{ background:C.blueBg,color:C.blue,fontSize:9,fontWeight:700,borderRadius:100,padding:"2px 6px" }}>🏷 AUCTION</span>}
             </div>
             <span style={{ fontSize:16,fontWeight:800,color:C.black }}>KSh {s.pay.toLocaleString()}</span>
           </div>
@@ -2052,8 +2001,6 @@ export default function BehariShipper({ onPostLoad = ()=>{}, postedLoads = [], n
   const [tab, setTab]               = useState(0);
   const [posting, setPosting]       = useState(false);
   const [detail, setDetail]         = useState(null);
-  const [showNotifs, setShowNotifs] = useState(false);
-  const [readIds, setReadIds]       = useState(new Set());
   const [toast, setToast]           = useState(null); // Feature 5 — SMS alert simulation
   const [lang, setLang] = useState(() => {
     try { return localStorage.getItem(LANG_KEY_SHIPPER) || "en"; } catch { return "en"; }
@@ -2065,30 +2012,53 @@ export default function BehariShipper({ onPostLoad = ()=>{}, postedLoads = [], n
   }
   const tl = I18N_SHIPPER[lang];
 
-  const displayNotifs = notifications.map(n => ({ ...n, read: readIds.has(n.id) }));
-  const unreadCount   = displayNotifs.filter(n => !n.read).length;
-
-  // Feature 5: SMS alert simulation — show toast on new notification
-  const prevNotifCount = useRef(notifications.length);
-  useEffect(() => {
-    if (notifications.length > prevNotifCount.current) {
-      const latest = notifications[notifications.length - 1];
-      if (latest) setToast(`📱 SMS Alert: Transporter ${latest.carrier} booked ${latest.loadId}`);
-    }
-    prevNotifCount.current = notifications.length;
-  }, [notifications.length]);
-
-  function markAllRead() {
-    setReadIds(new Set(notifications.map(n => n.id)));
-  }
-
   // Phase 3B — the single unified shipment list. Replaces the old
   // per-component merges of postedLoads + SHIPMENTS_SEED + SHIPMENT_HISTORY_SEED
   // with one call into the centralized pipeline: canonical load (SEED_LOADS
   // or a freshly-posted load) → toShipperShipmentView (live booking +
   // loadStatuses override + shipper-facing field shaping already applied).
   // Passed to every tab below instead of each one re-deriving its own merge.
-  const allShipments = getAllKnownLoads().map(l => toShipperShipmentView(l, notifications));
+  // 5D-3: the backend is the load source. Local records already linked to a backend load are dropped
+  // in favour of the backend copy; anything else local is demo data (browsable, no commercial actions).
+  const commerce = useCommerce("shipper");
+  const seenNotifs = useRef(null);
+  useEffect(() => {
+    if (!commerce.ready) return;
+    const ids = new Set(commerce.notifications.map(n => n.id));
+    if (seenNotifs.current) {
+      const fresh = commerce.notifications.filter(n => !seenNotifs.current.has(n.id));
+      if (fresh.length) setToast(`${fresh[0].title}: ${fresh[0].body}`);
+    }
+    seenNotifs.current = ids;
+  }, [commerce.notifications, commerce.ready]);
+  const demoShipments = getAllKnownLoads().filter(l => !l.backendLoadId).map(l => ({ ...toShipperShipmentView(l, notifications), isDemo:true }));
+  // Seeded backend fixtures with no posted price (e.g. KE-2039) mirror a local demo load; show only the demo copy.
+  const backendShipments = commerce.loads.filter(v => v.price != null).map(v => {
+    const booking = commerce.bookings.find(b => b.loadId === v.id);
+    const status = v.status === "Open" ? "Escrow Held" : v.status;
+    const road = v.distanceSource === "ROAD" && v.distanceMeters > 0;
+    return {
+      id:v.id, backendLoadId:v.id, isBackend:true, isDemo:false, status,
+      cargo:v.cargo, from:v.origin, to:v.destination, route:`${v.origin} → ${v.destination}`,
+      weight:v.weight ?? "—", truck:v.truckType || "Any Available",
+      pay:v.price ?? 0, dist:road ? metersToKm(v.distanceMeters) : 0, distSource:road ? "route" : "unresolved",
+      pickD:v.pickupDate || "TBD", eta:"TBD", truckCount:1,
+      progress:status === "Escrow Held" ? 10 : 25,
+      driver: booking ? "Transporter booked" : "Matching transporter…", plate:"—",
+      ping: booking ? "Price agreed · payment required" : "Awaiting offers",
+      createdAt: v.createdAt ? Date.parse(v.createdAt) : 0,
+    };
+  }).sort((a,b) => b.createdAt - a.createdAt);
+  const allShipments = [...backendShipments, ...demoShipments];
+
+  function openNotification(n) {
+    const offer = commerce.offers.find(o => o.id === n.relatedEntityId);
+    const loadId = offer?.loadId ?? commerce.bookings.find(b => b.id === n.relatedEntityId)?.loadId;
+    const target = allShipments.find(x => x.id === loadId);
+    if (target) setDetail(target);
+  }
+  // keep an open detail modal fresh as backend state changes
+  const liveDetail = detail ? (allShipments.find(x => x.id === detail.id) || detail) : null;
 
   return (
     <div style={{ background:C.bg, minHeight:"100vh", fontFamily:font, color:C.black, paddingBottom:68 }}>
@@ -2117,23 +2087,12 @@ export default function BehariShipper({ onPostLoad = ()=>{}, postedLoads = [], n
             <button onClick={toggleDark} title={darkMode?"Switch to light mode":"Switch to dark mode"} style={{ background:"none",border:`1px solid transparent`,borderRadius:8,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:18,flexShrink:0 }}>
               {darkMode ? "☀️" : "🌙"}
             </button>
-            {/* Bell icon with unread badge */}
-            <button
-              onClick={(e)=>{e.stopPropagation(); setShowNotifs(v=>!v)}}
-              style={{ position:"relative",background:showNotifs?C.bg:"none",border:`1px solid ${showNotifs?C.border:"transparent"}`,borderRadius:8,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:18,transition:"all 0.15s" }}
-            >
-              🔔
-              {unreadCount > 0 && (
-                <span style={{ position:"absolute",top:4,right:4,background:C.red,color:C.white,fontSize:9,fontWeight:800,borderRadius:"50%",width:16,height:16,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1 }}>
-                  {unreadCount > 9 ? "9+" : unreadCount}
-                </span>
-              )}
-            </button>
+            <CommerceBell notifications={commerce.notifications} onOpen={openNotification} onMarkRead={commerce.markRead} />
             <button onClick={()=>setPosting(true)} style={{ background:C.black,color:C.white,border:"none",borderRadius:8,padding:"8px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font }}>
               + Post Cargo
             </button>
             {/* Avatar — tap to sign out, mirrors carrier portal */}
-            <div onClick={onLogout} title="Sign out" style={{ width:34,height:34,borderRadius:"50%",background:C.black,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:C.white,cursor:"pointer",flexShrink:0 }}>BC</div>
+            <div onClick={onLogout} title="Sign out" style={{ width:34,height:34,borderRadius:"50%",background:C.black,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:C.white,cursor:"pointer",flexShrink:0 }}>{(commerce.identity?.name || "BC").split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase()}</div>
           </div>
         </div>
       </div>
@@ -2164,15 +2123,8 @@ export default function BehariShipper({ onPostLoad = ()=>{}, postedLoads = [], n
         <span style={{ fontSize:11,color:C.muted }}>© 2026 Behari Freight Ltd</span>
       </div>
 
-      {showNotifs && (
-        <NotificationsPanel
-          notifications={displayNotifs}
-          onClose={()=>setShowNotifs(false)}
-          onMarkAllRead={markAllRead}
-        />
-      )}
       {posting && <PostModal onClose={()=>setPosting(false)} onPostLoad={onPostLoad} truckAvailabilities={truckAvailabilities} onFindMatchesForCargo={onFindMatchesForCargo} onRequestMatch={onRequestMatch} onCheckNewCargoForMatches={onCheckNewCargoForMatches} />}
-      {detail   && <DetailModal s={detail} onClose={()=>setDetail(null)} onConfirmDelivery={onConfirmDelivery} escrowData={escrowData} bookingSlots={bookingSlots} onOpenDispute={onOpenDispute} onSubmitRating={onSubmitRating} truckAvailabilities={truckAvailabilities} onFindMatchesForCargo={onFindMatchesForCargo} />}
+      {liveDetail && <DetailModal s={liveDetail} commerce={commerce} onClose={()=>setDetail(null)} onConfirmDelivery={onConfirmDelivery} escrowData={escrowData} bookingSlots={bookingSlots} onOpenDispute={onOpenDispute} onSubmitRating={onSubmitRating} truckAvailabilities={truckAvailabilities} onFindMatchesForCargo={onFindMatchesForCargo} />}
       {/* Feature 5: SMS Alert Toast */}
       {toast && <Toast message={toast} onDone={()=>setToast(null)} />}
     </div>

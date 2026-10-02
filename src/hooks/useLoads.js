@@ -32,9 +32,9 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { createBackendLoad } from "../services/routeApi.js";
+import { createLoadFromForm } from "../models/load.js";
 import {
   createLoad,
-  linkBackendLoad,
   assignCarrier,
   updateLoadStatus,
   getStoreSnapshot,
@@ -131,19 +131,14 @@ export function useLoads() {
 
   /* ── Legacy actions (kept for backward compat) ── */
 
+  // 5D-3 — backend-first: a load exists only once the backend has accepted it.
+  // On failure nothing is created locally (no local-only commercial load).
   const postLoad = useCallback(async (formData) => {
-    const newLoad = await createLoad(formData);
-    setPostedLoads(prev => [newLoad, ...prev]);
-    sync();
-    // 5C-3 — the backend computes and stores the one canonical road route.
-    // If it is unreachable the load stays browsable as "estimated" and cannot be booked.
-    createBackendLoad(newLoad).then(async (view) => {
-      if (!view) return;
-      await linkBackendLoad(newLoad.id, view);
-      sync();
-    });
-    return newLoad;
-  }, [sync]);
+    const draft = createLoadFromForm(formData, 0);
+    const view = await createBackendLoad(draft);
+    if (!view?.id) throw new Error("Could not post cargo — the server is unreachable or rejected it. Nothing was posted; please try again.");
+    return { ...draft, id: view.id, backendLoadId: view.id };
+  }, []);
 
   const bookLoad = useCallback(async (bookingData) => {
     const notification = await assignCarrier(bookingData);

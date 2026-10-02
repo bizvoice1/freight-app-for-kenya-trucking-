@@ -8,6 +8,9 @@ import { TRUCK_FILTERS } from "./src/data/loads.js";
 import { getAllKnownLoads, toCarrierMarketplaceView, toCarrierTripView } from "./src/services/loadViews.js";
 import { sortNewestFirst, distLabel, decodePolyline, metersToKm } from "./src/models/geo.js";
 import { fetchBackendLoad } from "./src/services/routeApi.js";
+import { useCommerce } from "./src/hooks/useCommerce.js";
+import { fromBackendLoad, ksh } from "./src/models/backendLoad.js";
+import { MakeOfferForm, OfferThread, AgreedPriceBlock, CommerceBell, DemoBadge } from "./src/components/negotiation/negotiation.jsx";
 import GoogleMap from "./src/components/maps/GoogleMap.jsx";
 import { hasMapsKey } from "./src/services/googleMaps.js";
 import { CARRIER_FLEET_SEED as CARRIER_FLEET } from "./src/data/fleet.js";
@@ -274,17 +277,20 @@ function CargoRouteMap({ load }) {
 }
 
 /* ── LOAD CARD ──────────────────────────────────────────── */
-function LoadCard({ load, onBook, currency = "KSh" }) {
-  const [open, setOpen] = useState(false);
+function LoadCard({ load, commerce, focused, currency = "KSh" }) {
+  const [open, setOpen] = useState(!!focused);
+  const ref = useRef(null);
+  useEffect(() => { if (focused) { setOpen(true); ref.current?.scrollIntoView({ block:"center" }); } }, [focused]);
   const eta = calcETA(load.dist, load.from, load.to);
   return (
-    <div style={{ ...card, marginBottom:8 }}>
+    <div ref={ref} style={{ ...card, marginBottom:8 }} data-testid="load-card" data-load-id={load.id}>
       <div style={{ padding:16, cursor:"pointer" }} onClick={() => setOpen(!open)}>
 
         {/* Top: badges + rate */}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12 }}>
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
             <Pill color={C.secondary}>{load.truck}</Pill>
+            {load.isDemo && <Pill color={C.muted} bg={C.bg}>Demo</Pill>}
             {load.urgent && <Pill color={C.red} bg={C.redBg}>Urgent</Pill>}
           </div>
           <div style={{ textAlign:"right" }}>
@@ -336,7 +342,7 @@ function LoadCard({ load, onBook, currency = "KSh" }) {
         {/* Footer: shipper + ETA + chevron */}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
           <div style={{ fontSize:13, color:C.secondary }}>
-            {load.shipper} · <span style={{ color:C.amber }}>★ {load.rating}</span>
+            {load.shipper}{!load.isBackend && <> · <span style={{ color:C.amber }}>★ {load.rating}</span></>}
           </div>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
             {/* Feature 11 — ETA badge */}
@@ -385,182 +391,74 @@ function LoadCard({ load, onBook, currency = "KSh" }) {
             </div>
           )}
 
-          <div style={{ background:C.greenBg, borderRadius:8, padding:"10px 14px", marginBottom:12, fontSize:12, color:C.green, fontWeight:600 }}>
-            {load.backendLoadId
-              ? "📱 Shipper pays the agreed amount into M-Pesa escrow after booking · Released on delivery confirmation"
-              : "📱 Payment held in M-Pesa escrow · Released on delivery confirmation"}
-          </div>
-          <button onClick={() => onBook(load)} style={{ width:"100%", background:C.black, color:C.white, border:"none", borderRadius:8, padding:14, fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:font }}>
-            Book Load
-          </button>
+          {load.isBackend ? <CargoCommerce load={load} commerce={commerce} /> : <DemoBadge />}
         </div>
       )}
     </div>
   );
 }
 
-/* ── BOOK MODAL ─────────────────────────────────────────── */
-function BookModal({ load, onClose, onBookLoad, activePlates = new Set(), fraudFlags = {} }) {
-  const [step, setStep]           = useState("truck"); // "truck" | "confirm" | "done"
-  const [selectedTruck, setSelectedTruck] = useState(null);
+/* ── CARGO COMMERCE (5D-3) ───────────────────────────────
+ * Backend loads only: Posted Price / Road Distance / Posted KSh/km, then
+ * Accept at the posted price or negotiate through the offer thread. Every
+ * number is the backend's; demo loads never reach this block. */
+function CargoCommerce({ load, commerce }) {
+  const [offering, setOffering] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const thread = (commerce.threads[load.id] || []).find(t => t.transporterId === commerce.identity?.id);
+  const booking = commerce.bookings.find(b => b.loadId === load.id);
+  const hasRoad = load.distanceMeters > 0;
 
-  /* Feature 18 — blacklist check for current carrier */
-  const MY_CARRIER_ID = "james-mwangi"; // demo carrier ID
-  const myFlags = Object.values(fraudFlags).flat().filter(f => !f.resolved && (f.userId === MY_CARRIER_ID || f.userId === "CARRIER-001"));
-  if (myFlags.length > 0) {
-    return (
-      <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:16 }}>
-        <div style={{ background:C.white,borderRadius:16,padding:"32px 24px",maxWidth:360,width:"100%",textAlign:"center",fontFamily:font }}>
-          <div style={{ fontSize:40,marginBottom:16 }}>🚫</div>
-          <div style={{ fontSize:20,fontWeight:800,color:C.red,marginBottom:8 }}>Account Restricted</div>
-          <div style={{ fontSize:13,color:C.secondary,lineHeight:1.6,marginBottom:16 }}>
-            Your account has an active fraud flag and cannot book new loads until it is resolved by the admin team.
-          </div>
-          <div style={{ background:C.redBg,borderRadius:8,padding:"10px 14px",marginBottom:20,fontSize:12,color:C.red,fontWeight:600,textAlign:"left" }}>
-            🚩 Reason: {myFlags[0].reason}
-          </div>
-          <button onClick={onClose} style={{ width:"100%",background:C.black,color:C.white,border:"none",borderRadius:8,padding:13,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font }}>
-            Close
-          </button>
-        </div>
-      </div>
-    );
+  async function acceptPosted() {
+    setBusy(true); setError(null);
+    const r = await commerce.actions.acceptPostedPrice(load.id);
+    setBusy(false);
+    if (!r.ok) setError(r.error);
   }
 
-  function handleConfirm() {
-    onBookLoad({
-      loadId:    load.id,
-      cargo:     load.cargo,
-      carrier:   "James Mwangi",
-      plate:     selectedTruck.plate,
-      truckType: selectedTruck.type,
-    });
-    setStep("done");
+  if (booking) {
+    return <AgreedPriceBlock booking={booking} load={{ price: load.postedPrice }} />;
   }
-
-  /* ── Done screen ── */
-  if (step === "done") return (
-    <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:16 }}>
-      <div style={{ background:C.white,borderRadius:16,padding:"40px 24px",maxWidth:360,width:"100%",textAlign:"center",fontFamily:font }}>
-        <div style={{ width:64,height:64,background:C.greenBg,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:30,margin:"0 auto 20px" }}>✓</div>
-        <div style={{ fontSize:22,fontWeight:800,color:C.black,marginBottom:8 }}>Load Booked!</div>
-        <div style={{ fontSize:14,color:C.secondary,lineHeight:1.6,marginBottom:10 }}>
-          {load.id} confirmed. Truck <strong>{selectedTruck?.plate}</strong> is assigned.
-        </div>
-        <div style={{ background:C.greenBg,borderRadius:8,padding:"10px 14px",marginBottom:24,fontSize:13,color:C.green,fontWeight:600 }}>
-          📱 Shipper has been notified. M-Pesa escrow is locked.
-        </div>
-        <button onClick={onClose} style={{ width:"100%",background:C.black,color:C.white,border:"none",borderRadius:8,padding:14,fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:font }}>Done</button>
-      </div>
-    </div>
-  );
-
-  /* ── Step 1: Select Truck ── */
-  if (step === "truck") return (
-    <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:400 }} onClick={onClose}>
-      <div style={{ background:C.white,borderRadius:"16px 16px 0 0",width:"100%",maxWidth:480,padding:"8px 20px 28px",maxHeight:"88vh",overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
-        <div style={{ width:40,height:4,background:C.border,borderRadius:2,margin:"12px auto 20px" }} />
-
-        <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",marginBottom:4 }}>Select Your Truck</div>
-        <div style={{ fontSize:20,fontWeight:800,color:C.black,marginBottom:2 }}>{load.cargo}</div>
-        <div style={{ fontSize:13,color:C.secondary,marginBottom:20 }}>{load.from} → {load.to}</div>
-
-        <div style={{ fontSize:11,fontWeight:700,color:C.secondary,textTransform:"uppercase",letterSpacing:0.8,marginBottom:10 }}>Your Fleet ({CARRIER_FLEET.length} trucks)</div>
-
-        {CARRIER_FLEET.map(truck => {
-          const isAvail    = truck.status === "Available" && !activePlates.has(truck.plate);
-          const liveStatus = activePlates.has(truck.plate) ? "On Trip" : truck.status;
-          const isSelected = selectedTruck?.id === truck.id;
-          return (
-            <div
-              key={truck.id}
-              onClick={() => isAvail && setSelectedTruck(isSelected ? null : truck)}
-              style={{
-                border:`2px solid ${isSelected ? C.black : C.border}`,
-                borderRadius:10, padding:"14px 16px", marginBottom:8,
-                display:"flex", justifyContent:"space-between", alignItems:"center",
-                cursor:isAvail ? "pointer" : "not-allowed",
-                opacity:isAvail ? 1 : 0.45,
-                background:isSelected ? C.bg : C.white,
-                transition:"all 0.15s",
-              }}
-            >
-              <div>
-                <div style={{ fontSize:16,fontWeight:800,color:C.black,marginBottom:2 }}>{truck.plate}</div>
-                <div style={{ fontSize:13,color:C.secondary }}>{truck.type} · {truck.year}</div>
-              </div>
-              <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                <span style={{ background:isAvail?C.greenBg:C.amberBg, color:isAvail?C.green:C.amber, fontSize:11,fontWeight:700,borderRadius:100,padding:"3px 10px" }}>
-                  {liveStatus}
-                </span>
-                {isSelected && <span style={{ fontSize:20,color:C.green,fontWeight:700 }}>✓</span>}
-              </div>
-            </div>
-          );
-        })}
-
-        <button
-          disabled={!selectedTruck}
-          onClick={() => setStep("confirm")}
-          style={{
-            width:"100%", background:selectedTruck?C.black:C.border,
-            color:selectedTruck?C.white:C.muted, border:"none", borderRadius:8,
-            padding:15, fontSize:15, fontWeight:700, marginTop:8,
-            cursor:selectedTruck?"pointer":"not-allowed", fontFamily:font, transition:"all 0.2s",
-          }}
-        >
-          {selectedTruck ? `Continue with ${selectedTruck.plate} →` : "Select a truck to continue"}
-        </button>
-      </div>
-    </div>
-  );
-
-  /* ── Step 2: Confirm Booking ── */
   return (
-    <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:400 }} onClick={onClose}>
-      <div style={{ background:C.white,borderRadius:"16px 16px 0 0",width:"100%",maxWidth:480,padding:"8px 20px 32px",maxHeight:"88vh",overflowY:"auto" }} onClick={e=>e.stopPropagation()}>
-        <div style={{ width:40,height:4,background:C.border,borderRadius:2,margin:"12px auto 16px" }} />
-
-        {/* Back */}
-        <button onClick={()=>setStep("truck")} style={{ background:"none",border:"none",fontSize:13,color:C.muted,fontWeight:700,cursor:"pointer",fontFamily:font,padding:"0 0 12px",display:"flex",alignItems:"center",gap:4 }}>
-          ← Back to truck selection
-        </button>
-
-        <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",marginBottom:4 }}>Confirm Booking</div>
-        <div style={{ fontSize:22,fontWeight:800,color:C.black,marginBottom:2 }}>{load.cargo}</div>
-        <div style={{ fontSize:14,color:C.secondary,marginBottom:16 }}>{load.from} → {load.to}</div>
-
-        {/* Selected truck banner */}
-        <div style={{ background:C.bg,borderRadius:10,padding:"12px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-          <div>
-            <div style={{ fontSize:10,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",marginBottom:3 }}>Assigned Truck</div>
-            <div style={{ fontSize:16,fontWeight:800,color:C.black }}>{selectedTruck?.plate}</div>
-            <div style={{ fontSize:13,color:C.secondary }}>{selectedTruck?.type} · {selectedTruck?.year}</div>
+    <div data-testid="cargo-commerce">
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:10 }}>
+        {[
+          ["Posted Price", load.postedPrice ? ksh(load.postedPrice) : "—"],
+          ["Road Distance", hasRoad ? `${load.dist} km` : "n/a"],
+          ["Posted Rate", hasRoad && load.rateKm ? `KSh ${load.rateKm}/km` : "—"],
+        ].map(([k, v]) => (
+          <div key={k} style={{ background:C.bg, borderRadius:8, padding:"10px 8px", textAlign:"center" }}>
+            <div style={{ fontSize:10, color:C.muted, fontWeight:700, textTransform:"uppercase", letterSpacing:0.4, marginBottom:3 }}>{k}</div>
+            <div style={{ fontSize:13, fontWeight:800, color:C.black }}>{v}</div>
           </div>
-          <button onClick={()=>setStep("truck")} style={{ background:C.white,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,color:C.secondary }}>
-            Change
+        ))}
+      </div>
+      {error && <div data-testid="commerce-error" style={{ fontSize:12, color:C.red, fontWeight:600, marginBottom:8 }}>{error}</div>}
+      {!thread && !offering && (
+        <div style={{ display:"flex", gap:8 }}>
+          {load.postedPrice > 0 && (
+            <button disabled={busy} onClick={acceptPosted} data-testid="accept-posted"
+              style={{ flex:1, background:C.black, color:C.white, border:"none", borderRadius:8, padding:14, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:font, opacity:busy?0.6:1 }}>
+              {busy ? "Booking…" : `Accept ${ksh(load.postedPrice)}`}
+            </button>
+          )}
+          <button onClick={() => setOffering(true)} data-testid="make-offer"
+            style={{ flex:1, background:C.white, color:C.black, border:`1.5px solid ${C.black}`, borderRadius:8, padding:14, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:font }}>
+            Make an Offer
           </button>
         </div>
-
-        <div style={{ background:C.bg,borderRadius:12,overflow:"hidden",marginBottom:16 }}>
-          {[
-            ["Pickup",    `${load.pickD}, ${load.pickT}`],
-            ["Delivery",  `${load.delD}, ${load.delT}`],
-            ["Distance",  load.dist ? distLabel(load).text : "TBD"],
-            ["Weight",    load.weight],
-            ["Equipment", load.truck],
-            ...(load.truckCount > 0 ? [["Trucks",`${load.truckCount} needed · ${load.trucksRemaining} remaining`]] : []),
-            ...(load.penalty   > 0 ? [["Late Penalty",`KSh ${load.penalty.toLocaleString()}/day`]] : []),
-            ["Payment",   `KSh ${load.pay.toLocaleString()}`],
-          ].map(([k,v],i,a) => (
-            <Row key={k} label={k} value={v} last={i===a.length-1} />
-          ))}
-        </div>
-
-        <button onClick={handleConfirm} style={{ width:"100%",background:C.black,color:C.white,border:"none",borderRadius:8,padding:16,fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:font }}>
-          Confirm Booking
-        </button>
-      </div>
+      )}
+      {!thread && offering && (
+        <MakeOfferForm postedPrice={load.postedPrice} onCancel={() => setOffering(false)}
+          onSubmit={async (amt, note) => { const r = await commerce.actions.makeOffer(load.id, amt, note); if (r.ok) setOffering(false); return r; }} />
+      )}
+      {thread && (
+        <OfferThread thread={{ ...thread, title: "Your negotiation" }} partyLabel={() => "Shipper"}
+          onAccept={commerce.actions.accept} onCounter={commerce.actions.counter}
+          onReject={commerce.actions.reject} onWithdraw={commerce.actions.withdraw} highlight />
+      )}
+      <div style={{ fontSize:11, color:C.muted, marginTop:8 }}>Accepting or agreeing a price does not charge you — the shipper pays the agreed price to secure the booking.</div>
     </div>
   );
 }
@@ -568,12 +466,13 @@ function BookModal({ load, onClose, onBookLoad, activePlates = new Set(), fraudF
 /* ── FIND LOADS ─────────────────────────────────────────── */
 const CURR_RATES = { KSh:1, USD:0.0077, UGX:28.5, TZS:10.2 };
 function fmtCurr(ksh, currency) {
+  if (ksh == null) return "Offers invited";
   const rate = CURR_RATES[currency] || 1;
   if (currency === "KSh") return `KSh ${ksh.toLocaleString()}`;
   return `${currency} ${Math.round(ksh * rate).toLocaleString()}`;
 }
 
-function FindLoads({ onBook, allLoads = LOADS }) {
+function FindLoads({ commerce, focusId, allLoads = [] }) {
   const [filter, setFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [sort, setSort]     = useState("new");
@@ -645,7 +544,7 @@ function FindLoads({ onBook, allLoads = LOADS }) {
           {(minPay||maxPay)&&<button onClick={()=>{setMinPay("");setMaxPay("");}} style={{ background:C.redBg,color:C.red,border:"none",borderRadius:8,padding:"7px 10px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:font }}>✕</button>}
         </div>
 
-        {loads.map(l => <LoadCard key={l.id} load={l} onBook={onBook} currency={currency} />)}
+        {loads.map(l => <LoadCard key={l.id} load={l} commerce={commerce} focused={focusId === l.id} currency={currency} />)}
         {loads.length === 0 && (
           <div style={{ textAlign:"center",padding:"60px 20px",color:C.muted }}>
             <div style={{ fontSize:36,marginBottom:12 }}>🔍</div>
@@ -2515,8 +2414,8 @@ function MyTruck({ allLoads = [], truckAvailabilities = [], onDeclareAvailabilit
               return (
                 <MatchCard
                   key={m.id} match={m} truck={viewingTruck} cargo={cargo}
-                  primaryLabel="Book Load"
-                  onPrimary={async () => { await onAcceptMatch(m.id); onBook(cargo); }}
+                  primaryLabel={cargo.isBackend ? "View & Make Offer" : "Demo Load — booking unavailable"}
+                  onPrimary={() => onBook(cargo)}
                 />
               );
             })}
@@ -2540,6 +2439,26 @@ function Toast({ message, onDone }) {
   );
 }
 
+/* ── BACKEND BOOKINGS (5D-3) — agreed terms straight from the backend booking ─ */
+function BackendBookings({ commerce }) {
+  if (commerce.bookings.length === 0) return null;
+  return (
+    <div style={{ padding:"12px 12px 0" }} data-testid="backend-bookings">
+      <div style={{ fontSize:11, color:C.muted, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase", marginBottom:8 }}>Agreed Bookings</div>
+      {commerce.bookings.map(b => {
+        const l = commerce.bookedLoads[b.loadId];
+        return (
+          <div key={b.id} style={{ ...card, padding:14, marginBottom:8 }}>
+            <div style={{ fontSize:15, fontWeight:800, color:C.black, marginBottom:2 }}>{l ? `${l.origin} → ${l.destination}` : b.loadId}</div>
+            <div style={{ fontSize:12, color:C.muted, marginBottom:10 }}>{l?.cargo} · {b.id} · {b.status}</div>
+            <AgreedPriceBlock booking={b} load={l} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ── ROOT ───────────────────────────────────────────────── */
 const LANG_KEY_CARRIER = "behari_lang_carrier";
 const I18N_CARRIER = {
@@ -2557,7 +2476,7 @@ const NAV = [
 ];
 
 export default function BehariFreight({
-  postedLoads = [], onBookLoad = ()=>{}, notifications = [],
+  postedLoads = [], notifications = [],
   deliveredLoadIds = new Set(), onLogout = ()=>{},
   loadStatuses = {},
   onAcceptLoad=()=>{}, onRejectLoad=()=>{}, onCancelShipment=()=>{},
@@ -2580,7 +2499,29 @@ export default function BehariFreight({
   matchNotifications=[], onMarkNotificationRead=()=>{},
 }) {
   const [tab, setTab]       = useState(1);
-  const [booking, setBooking] = useState(null);
+  const commerce = useCommerce("fleet_owner");
+  const [focusId, setFocusId] = useState(null);
+  const [demoToast, setDemoToast] = useState(null);
+  const seenBookings = useRef(null);
+  useEffect(() => {
+    if (!commerce.ready) return;
+    const ids = new Set(commerce.bookings.map(b => b.id));
+    if (seenBookings.current) {
+      const fresh = commerce.bookings.filter(b => !seenBookings.current.has(b.id));
+      if (fresh.length) { setDemoToast(`Price agreed: ${ksh(fresh[0].agreedAmount)}. Payment required to secure this booking.`); setTab(2); }
+    }
+    seenBookings.current = ids;
+  }, [commerce.bookings, commerce.ready]);
+  function openCargo(load) {
+    if (!load.isBackend) { setDemoToast("Demo Load — booking unavailable"); return; }
+    setFocusId(load.id); setTab(1);
+  }
+  function openNotification(n) {
+    const offer = commerce.offers.find(o => o.id === n.relatedEntityId);
+    const loadId = offer?.loadId ?? commerce.bookings.find(b => b.id === n.relatedEntityId)?.loadId;
+    if (loadId && commerce.bookings.some(b => b.loadId === loadId)) { setTab(2); return; }
+    if (loadId) { setFocusId(null); setTimeout(() => setFocusId(loadId), 0); setTab(1); }
+  }
   // Flow C — "new match found" toast. Checks for any unread notification
   // (not just growth since last render) because this portal fully remounts
   // whenever the carrier switches away and back — a match created while
@@ -2600,8 +2541,6 @@ export default function BehariFreight({
     );
     unread.forEach(n => onMarkNotificationRead(n.id));
   }, [matchNotifications]); // eslint-disable-line
-  const [showCarrierNotifs, setShowCarrierNotifs] = useState(false);
-  const [carrierNotifBadge, setCarrierNotifBadge] = useState(() => loadCarrierNotifs().filter(n=>!n.read).length);
   /* Feature 28 — Onboarding walkthrough */
   const TOUR_KEY = "behari_tour_done";
   const [tourStep, setTourStep] = useState(() => {
@@ -2646,9 +2585,15 @@ export default function BehariFreight({
   // got wrong, since MARKETPLACE_LOADS never tracked status at all and would
   // have shown every one of its 8 loads as bookable regardless of reality.
   const BOOKABLE_STATUSES = new Set(["Open", undefined, null, "Escrow Held"]);
-  const allLoads = getAllKnownLoads()
+  // 5D-3 — the backend is the only commercial source. Local records are demo
+  // listings (browse/maps only); any local record already linked to a backend
+  // load is dropped in favour of the backend's canonical copy.
+  const demoLoads = getAllKnownLoads()
     .map(l => toCarrierMarketplaceView(l))
-    .filter(l => BOOKABLE_STATUSES.has(l.status));
+    .filter(l => BOOKABLE_STATUSES.has(l.status) && !l.backendLoadId)
+    .map(l => ({ ...l, isDemo: true, isBackend: false }));
+  const backendLoads = commerce.loads.filter(l => l.status === "Open").map(fromBackendLoad);
+  const allLoads = [...backendLoads, ...demoLoads];
 
   // Matching engine cargo pool — adds the deliberately-crafted, deliberately
   // SEPARATE matching demo cargo (network.js) on top of the canonical
@@ -2656,7 +2601,7 @@ export default function BehariFreight({
   // detour/partial scenarios to find. DEMO_MATCH_CARGO is synthetic cargo,
   // not real load identities, so it is not part of SEED_LOADS.
   const matchCargoPool = [...allLoads, ...DEMO_MATCH_CARGO.map(l => ({
-    ...l, status: loadStatuses[l.id] ?? l.status,
+    ...l, status: loadStatuses[l.id] ?? l.status, isDemo: true, isBackend: false,
   }))].filter(l => BOOKABLE_STATUSES.has(l.status) || l.status === undefined);
 
   // Phase 3C — "my trips" replaces the old myBookedLoads (postedLoads-only)
@@ -2711,20 +2656,17 @@ export default function BehariFreight({
             <button onClick={toggleDark} title={darkMode?"Switch to light mode":"Switch to dark mode"} style={{ background:"none",border:`1px solid transparent`,borderRadius:8,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:18,flexShrink:0 }}>
               {darkMode ? "☀️" : "🌙"}
             </button>
-            {/* Carrier notifications bell (Feature 6) */}
-            <button onClick={e=>{ e.stopPropagation(); setShowCarrierNotifs(v=>!v); setCarrierNotifBadge(0); }} style={{ position:"relative",background:showCarrierNotifs?C.bg:"none",border:`1px solid ${showCarrierNotifs?C.border:"transparent"}`,borderRadius:8,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:18,flexShrink:0 }}>
-              🔔
-              {carrierNotifBadge>0&&<span style={{ position:"absolute",top:4,right:4,background:C.red,color:C.white,fontSize:9,fontWeight:800,borderRadius:"50%",width:16,height:16,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1 }}>{carrierNotifBadge>9?"9+":carrierNotifBadge}</span>}
-            </button>
-            <div onClick={onLogout} style={{ width:34,height:34,borderRadius:"50%",background:C.black,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:C.white,cursor:"pointer" }} title="Account / Sign out">JM</div>
+            <CommerceBell notifications={commerce.notifications} onOpen={openNotification} onMarkRead={commerce.markRead} />
+            <div onClick={onLogout} style={{ width:34,height:34,borderRadius:"50%",background:C.black,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:C.white,cursor:"pointer" }} title="Account / Sign out">{(commerce.identity?.name || "?").split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase()}</div>
           </div>
         </div>
       </div>
 
       {/* Content */}
       <div>
-        {tab===0 && <MyTruck allLoads={matchCargoPool} truckAvailabilities={truckAvailabilities} onDeclareAvailability={onDeclareAvailability} onFindMatchesForTruck={onFindMatchesForTruck} onAcceptMatch={onAcceptMatch} onBook={setBooking} />}
-        {tab===1 && <FindLoads onBook={setBooking} allLoads={allLoads} />}
+        {tab===0 && <MyTruck allLoads={matchCargoPool} truckAvailabilities={truckAvailabilities} onDeclareAvailability={onDeclareAvailability} onFindMatchesForTruck={onFindMatchesForTruck} onAcceptMatch={onAcceptMatch} onBook={openCargo} />}
+        {tab===1 && <FindLoads commerce={commerce} focusId={focusId} allLoads={allLoads} />}
+        {tab===2 && <BackendBookings commerce={commerce} />}
         {tab===2 && <MyLoads myTrips={myTrips}
           onAcceptLoad={onAcceptLoad} onRejectLoad={onRejectLoad} onCancelShipment={onCancelShipment}
           onConfirmLoading={onConfirmLoading} onStartTrip={onStartTrip}
@@ -2737,7 +2679,6 @@ export default function BehariFreight({
       </div>
 
       {/* Carrier notifications panel */}
-      {showCarrierNotifs && <CarrierNotifPanel onClose={()=>setShowCarrierNotifs(false)} />}
 
       {/* Feature 28 — Onboarding tour overlay */}
       {tourStep >= 0 && tourStep < TOUR_STEPS.length && (
@@ -2783,7 +2724,7 @@ export default function BehariFreight({
         })}
       </div>
 
-      {booking && <BookModal load={booking} onClose={()=>setBooking(null)} onBookLoad={onBookLoad} activePlates={activePlates} fraudFlags={fraudFlags} />}
+      {demoToast && <Toast message={demoToast} onDone={()=>setDemoToast(null)} />}
       {matchToast && <Toast message={matchToast} onDone={()=>setMatchToast(null)} />}
     </div>
   );

@@ -581,7 +581,6 @@ export default function App() {
       fraudFlags,
       darkMode, toggleDark,
       onPostLoad:           handlePostLoad,
-      onBookLoad:           handleBookLoad,
       onConfirmDelivery:    handleConfirmDelivery,
       onLogout:             triggerLogout,
       onAcceptLoad:         handleAcceptLoad,

@@ -17,37 +17,10 @@
  * portal login, not a hole in trip/location authorization.
  */
 
-// See trackingService.js's identical note: default to whatever host served
-// this page, not a hardcoded "localhost", so a portal opened from another
-// device on the LAN still reaches the right backend.
-const API_BASE = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL)
-  || (typeof window !== "undefined" && `http://${window.location.hostname}:4000`)
-  || "http://localhost:4000";
+import { getToken } from "./backendSession.js";
+import { API_BASE } from "./backendSession.js";
 
-// Matches backend/src/db/seed.js exactly — see backend/README.md's dev login table.
-const DEMO_CREDENTIALS = {
-  shipper:     { phone: "0700000001", pin: "1234" },
-  admin:       { phone: "0700000002", pin: "1234" },
-  fleet_owner: { phone: "0722100200", pin: "1234" },
-};
-
-const _tokenCache = new Map(); // role -> token
-
-async function _ensureToken(role) {
-  if (_tokenCache.has(role)) return _tokenCache.get(role);
-  const creds = DEMO_CREDENTIALS[role];
-  if (!creds) throw new Error(`No demo credentials configured for role "${role}".`);
-
-  const res = await fetch(`${API_BASE}/api/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...creds, role }),
-  });
-  if (!res.ok) throw new Error(`Could not authenticate with tracking backend as ${role}.`);
-  const data = await res.json();
-  _tokenCache.set(role, data.token);
-  return data.token;
-}
+const _ensureToken = getToken;
 
 async function _get(path, role) {
   const token = await _ensureToken(role);

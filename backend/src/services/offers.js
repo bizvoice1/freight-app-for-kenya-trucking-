@@ -17,7 +17,7 @@
 
 import { and, eq, lte, asc } from "drizzle-orm";
 import { db, isUniqueConstraintError } from "../db/client.js";
-import { offers, loads, bookings } from "../db/schema.js";
+import { offers, loads, bookings, users } from "../db/schema.js";
 import { LOAD_STATUS } from "../domain/load.js";
 import { createBooking, AGREEMENT_SOURCE } from "../domain/booking.js";
 import {
@@ -97,7 +97,7 @@ function finalizeAgreement(tx, { load, transporterId, agreedAmount, source, agre
 async function sendNotifications(list) {
   for (const n of list) {
     try {
-      await notifyUsers([n.userId], n.type, n.title, n.body, "offer", n.entityId);
+      await notifyUsers([n.userId], n.type, n.title, n.body, n.entityType ?? "offer", n.entityId);
     } catch (err) {
       console.error("offer notification failed:", err?.message);
     }
@@ -313,8 +313,12 @@ export async function acceptLoadAtPostedPrice(user, loadId, requestId) {
       });
       return {
         booking,
-        notifications: closedOffers.map(o => ({ userId: o.proposerId, type: NOTIFICATION_TYPE.OFFER_REJECTED, entityId: o.id,
-          title: "Offer closed", body: `${describeLoad(load)} was accepted at the posted price` })),
+        notifications: [
+          { userId: load.shipperId, type: NOTIFICATION_TYPE.BOOKING_CONFIRMED, entityId: booking.id, entityType: "booking",
+            title: "Booking confirmed", body: `${ksh(load.price)} agreed (posted price) for ${describeLoad(load)}` },
+          ...closedOffers.map(o => ({ userId: o.proposerId, type: NOTIFICATION_TYPE.OFFER_REJECTED, entityId: o.id,
+            title: "Offer closed", body: `${describeLoad(load)} was accepted at the posted price` })),
+        ],
       };
     } catch (err) {
       if (isUniqueConstraintError(err)) fail(409, "LOAD_NO_LONGER_OPEN", `Load ${load.id} was just accepted by another transporter.`);
@@ -336,10 +340,16 @@ export function expireDueOffers(nowMs = Date.now()) {
   });
 }
 
+const transporterName = (id) => {
+  const [u] = db.select({ name: users.name }).from(users).where(eq(users.id, id)).all();
+  return u?.name ?? null;
+};
+
 const decorate = (offer, user, nowMs = Date.now()) => {
   const expired = offer.status === OFFER_STATUS.PENDING && isOfferExpired(offer, nowMs);
   return {
     ...offer,
+    transporterName: transporterName(offer.transporterId),
     effectiveStatus: expired ? OFFER_STATUS.EXPIRED : offer.status,
     isFinalRound: offer.round >= MAX_ROUNDS,
     mine: offer.proposerId === user.id,
