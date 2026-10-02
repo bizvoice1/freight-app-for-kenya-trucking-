@@ -268,7 +268,8 @@ function LoadCard({ load, onBook, currency = "KSh" }) {
         <div style={{ borderTop:`1px solid ${C.border}`, padding:16 }}>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:12 }}>
             {[
-              ["Weight",        load.weight],
+              ["Cargo Type",    load.cargo],
+              ["Quantity",      load.weight],
               ["Equipment",     load.truck],
               ["Pickup Date",   load.pickD !== "TBD" ? load.pickD : "TBD"],
               ["Delivery Date", load.delD  !== "TBD" ? load.delD  : "TBD"],
@@ -285,6 +286,13 @@ function LoadCard({ load, onBook, currency = "KSh" }) {
               </div>
             ))}
           </div>
+
+          {load.description && (
+            <div style={{ background:C.bg, borderRadius:8, padding:"10px 12px", marginBottom:12 }}>
+              <div style={{ fontSize:11, color:C.muted, fontWeight:600, marginBottom:3, textTransform:"uppercase", letterSpacing:0.5 }}>Cargo Description</div>
+              <div style={{ fontSize:13, color:C.black, lineHeight:1.5 }}>{load.description}</div>
+            </div>
+          )}
 
           {load.penalty > 0 && (
             <div style={{ background:C.amberBg, border:`1px solid ${C.amber}`, borderRadius:8, padding:"10px 14px", marginBottom:10, fontSize:12, fontWeight:700, color:C.amber }}>

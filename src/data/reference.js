@@ -23,39 +23,54 @@ export const CORRIDORS = [
 
 /** Cargo categories accepted on the platform. */
 export const CARGO_TYPES = [
-  "Bagged Grain",
-  "FMCG Goods",
-  "Steel & Metals",
+  "General Cargo",
+  "FMCG",
   "Building Materials",
+  "Steel",
+  "Machinery",
+  "Agricultural Produce",
   "Fresh Produce",
-  "Perishable Goods",
-  "Loose Cargo",
-  "Bulk",
-  "Petroleum",
-  "Container Cargo",
+  "Flowers",
+  "Furniture",
+  "Electronics",
+  "Chemicals",
+  "Vehicle",
   "Other",
 ];
 
 /** Truck / equipment types available for booking. */
 export const TRUCK_TYPES = [
-  "33-Tonne Flatbed",
+  "Pickup",
+  "Canter",
+  "3-Ton",
+  "5-Ton",
+  "7-Ton",
+  "10-Ton",
+  "15-Ton",
+  "20-Ton",
+  "25-Ton",
+  "Trailer",
+  "Flatbed",
+  "Low Loader",
+  "Car Carrier",
   "Tipper",
-  "Open Truck",
-  "Box Truck",
-  "Lowbed",
-  "Reefer Van (Refrigerated)",
   "Tanker",
-  "Semi-Trailer / Container",
-  "Curtainsider",
-  "Any Available",
+  "Refrigerated Truck",
+  "Curtain-Sider",
+  "Container Carrier",
 ];
 
-/** Weight/volume unit options for cargo specification. */
+/** Weight/volume/count unit options for cargo specification. */
 export const CARGO_UNITS = [
-  "Tonnes",
-  "Cubic Metres",
-  "Pallets",
   "Pieces",
+  "Boxes",
+  "Sacks",
+  "KGs",
+  "Tonnes",
+  "Pallets",
+  "Containers",
+  "Vehicles",
+  "Other",
 ];
 
 /** Number-of-trucks options for a multi-truck load post. */

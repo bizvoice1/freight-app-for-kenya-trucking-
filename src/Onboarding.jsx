@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { TRUCK_TYPES } from "./data/reference.js";
 
 const C = {
   white:"#FFFFFF", bg:"#F6F6F6", border:"#EBEBEB",
@@ -13,7 +14,9 @@ const font  = "Inter, -apple-system, BlinkMacSystemFont, sans-serif";
 const inp   = { width:"100%", background:C.bg, border:`1.5px solid ${C.border}`, borderRadius:8, padding:"12px 14px", fontSize:14, fontFamily:font, color:C.black, outline:"none", fontWeight:500, transition:"border-color 0.15s" };
 const lbl   = { display:"block", fontSize:11, fontWeight:700, color:C.secondary, letterSpacing:0.8, textTransform:"uppercase", marginBottom:5 };
 
-const TRUCK_TYPES   = ["33-Tonne Flatbed","Lowbed","Refrigerated Van","Box Truck","Tipper","Open Truck","Tanker","Side Tipper","Low Loader","Car Carrier"];
+// TRUCK_TYPES is imported from the data layer — same vocabulary a shipper
+// picks from when specifying a load's required truck type (src/data/reference.js),
+// so a transporter can always register the type of truck a shipper might need.
 const CAPACITIES    = ["3T","5T","7T","10T","14T","18T","22T","26T","28T","30T","34T"];
 
 const DOCS = [

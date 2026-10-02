@@ -185,14 +185,14 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
           <input style={inp} placeholder="e.g. Kampala, Nakawa Industrial Area" value={form.destination} onChange={e=>set("destination",e.target.value)} />
 
           <label style={lbl}>Cargo Type</label>
-          <select style={inp} value={form.cargoType} onChange={e=>set("cargoType",e.target.value)}>
+          <select style={inp} value={form.cargoType} onChange={e=>{ const v=e.target.value; setForm(f=>({...f, cargoType:v, unit: v==="Vehicle" ? "Vehicles" : f.unit})); }}>
             <option value="">Select cargo type…</option>
             {CARGO_TYPES.map(c=><option key={c}>{c}</option>)}
           </select>
 
           <label style={lbl}>
             Cargo Description
-            <span style={{ fontWeight:400,color:C.muted,fontSize:10,textTransform:"none",letterSpacing:0 }}> — optional detail</span>
+            <span style={{ fontWeight:400,color:C.muted,fontSize:10,textTransform:"none",letterSpacing:0 }}> — shown to transporters before they accept</span>
           </label>
           <input style={inp} placeholder='e.g. "28 tons of ceramic tiles on wooden pallets"' value={form.description} onChange={e=>set("description",e.target.value)} />
 
@@ -371,6 +371,7 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
             {[
               ["Route",    `${form.pickup} → ${form.destination}`],
               ["Cargo",    form.cargoType],
+              ...(form.description ? [["Description", form.description]] : []),
               ["Weight",   `${form.weight} ${form.unit}`],
               ["Truck",    `${form.truckCount} × ${form.truckType || "Any Available"}`],
               ["Pickup",   form.pickupDate || "—"],
