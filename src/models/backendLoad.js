@@ -9,6 +9,7 @@ import { metersToKm } from "./geo.js";
 export const COMMERCIAL_NOTIFICATION_TYPES = new Set([
   "offer_received", "offer_countered", "offer_accepted", "offer_rejected", "booking_confirmed",
   "payment_confirmed", "payment_failed", "escrow_held",
+  "adjustment_proposed", "adjustment_decided", "adjustment_funded",
 ]);
 
 /** agreedAmount ÷ (agreedRoadDistanceMeters / 1000), whole KSh/km. Null when it cannot be computed. */
@@ -69,4 +70,18 @@ export function paymentView(payment) {
   if (st === "StkSent" || st === "Pending") return { key: "awaiting", label: "Awaiting M-Pesa confirmation" };
   if (["Timeout", "Failed", "Cancelled"].includes(st)) return { key: "unsuccessful", label: "Payment unsuccessful" };
   return { key: "required", label: "Payment required" };
+}
+
+/** Display label for a backend adjustment status, per viewer. */
+export function adjustmentStatusLabel(status, viewer) {
+  switch (status) {
+    case "PROPOSED":  return viewer === "shipper" ? "Awaiting your approval" : "Awaiting shipper approval";
+    case "APPROVED":  return viewer === "shipper" ? "Approved — payment required" : "Approved — awaiting payment";
+    case "FUNDING":   return "Funding — awaiting M-Pesa confirmation";
+    case "FUNDED":    return "Funded";
+    case "REJECTED":  return "Rejected";
+    case "WITHDRAWN": return "Withdrawn";
+    case "EXPIRED":   return "Expired";
+    default:          return status;
+  }
 }

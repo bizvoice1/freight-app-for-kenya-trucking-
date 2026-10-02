@@ -5,7 +5,7 @@
  * portals. Plain props only: every amount shown comes from backend records.
  */
 import { useState } from "react";
-import { ksh, agreedRatePerKm, normalizeKenyanPhone, paymentView } from "../../models/backendLoad.js";
+import { ksh, agreedRatePerKm, normalizeKenyanPhone, paymentView, adjustmentStatusLabel } from "../../models/backendLoad.js";
 import { metersToKm } from "../../models/geo.js";
 
 const P = {
@@ -157,7 +157,7 @@ export function OfferThread({ thread, partyLabel, onAccept, onCounter, onReject,
 }
 
 /** Posted vs agreed commercial terms for a booking — all values from the backend booking/load. */
-export function AgreedPriceBlock({ booking, load, viewer = "transporter", onFund }) {
+export function AgreedPriceBlock({ booking, load, viewer = "transporter", onFund, finance, adjActions }) {
   const rate = agreedRatePerKm(booking.agreedAmount, booking.agreedRoadDistanceMeters);
   const rows = [
     ["Posted Price", load?.price ? ksh(load.price) : "—"],
@@ -176,6 +176,7 @@ export function AgreedPriceBlock({ booking, load, viewer = "transporter", onFund
         ))}
       </div>
       <BookingPayment booking={booking} viewer={viewer} onFund={onFund} />
+      {finance && adjActions && <BookingAdjustments booking={booking} postedPrice={load?.price} finance={finance} viewer={viewer} actions={adjActions} />}
     </div>
   );
 }
@@ -234,7 +235,7 @@ export function BookingPayment({ booking, viewer, onFund }) {
   );
 }
 
-const NOTIF_ICON = { offer_received:"💬", offer_countered:"↔️", offer_accepted:"✅", offer_rejected:"✖️", booking_confirmed:"📦", payment_confirmed:"💳", payment_failed:"⚠️", escrow_held:"🔒" };
+const NOTIF_ICON = { offer_received:"💬", offer_countered:"↔️", offer_accepted:"✅", offer_rejected:"✖️", booking_confirmed:"📦", payment_confirmed:"💳", payment_failed:"⚠️", escrow_held:"🔒", adjustment_proposed:"➕", adjustment_decided:"☑️", adjustment_funded:"💳" };
 
 /** Bell + dropdown of backend offer/booking notifications. */
 export function CommerceBell({ notifications, onOpen, onMarkRead }) {
@@ -280,3 +281,113 @@ export const DemoBadge = () => (
     Demo Load — booking unavailable
   </div>
 );
+
+const OPEN_ADJ = new Set(["PROPOSED", "APPROVED", "FUNDING"]);
+
+/** Ledger + adjustment workflow. Every figure is read from the backend ledger / adjustment rows. */
+export function BookingAdjustments({ booking, postedPrice, finance, viewer, actions }) {
+  const { ledger, adjustments } = finance;
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const [phone, setPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const sorted = [...adjustments].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const active = sorted.find(a => OPEN_ADJ.has(a.status));
+  const allow = ledger.allowance;
+  const money = (n) => ksh(n);
+
+  const run = async (fn) => {
+    setBusy(true); setError(null);
+    const r = await fn();
+    setBusy(false);
+    if (!r.ok) setError(r.error);
+    return r;
+  };
+  async function submitRequest() {
+    const n = Number(amount);
+    if (!Number.isInteger(n) || n <= 0) { setError("Enter a whole number of KSh."); return; }
+    const r = await run(() => actions.requestAdjustment(booking.id, n, reason.trim()));
+    if (r.ok) { setOpen(false); setAmount(""); setReason(""); }
+  }
+  async function fundAdj(a) {
+    const n = normalizeKenyanPhone(phone);
+    if (!n) { setError("Enter a valid Kenyan M-Pesa number, e.g. 0712 345 678."); return; }
+    await run(() => actions.fundAdjustment(a.id, n));
+  }
+  const row = (k, v, strong) => (
+    <div key={k} style={{ display:"flex", justifyContent:"space-between", fontSize:12, padding:"4px 0", fontWeight: strong ? 800 : 500, color: strong ? P.black : P.secondary }}>
+      <span>{k}</span><span>{v}</span>
+    </div>
+  );
+  const hasAdj = ledger.approvedAdjustments > 0;
+
+  return (
+    <div style={{ marginTop:12, borderTop:`1px solid ${P.border}`, paddingTop:10 }} data-testid="adjustments">
+      <div style={{ fontSize:11, fontWeight:700, color:P.muted, letterSpacing:0.8, textTransform:"uppercase", marginBottom:6 }}>Price adjustments</div>
+      <div style={{ background:P.bg, borderRadius:8, padding:"8px 12px" }} data-testid="ledger">
+        {postedPrice ? row("Original posted price", money(postedPrice)) : null}
+        {row("Agreed booking price", money(ledger.agreedAmount))}
+        {hasAdj && row("Approved adjustment", `+${money(ledger.approvedAdjustments)}`)}
+        {row("Total obligation", money(ledger.totalObligation), true)}
+        {row("Confirmed funding", money(ledger.confirmedFunding))}
+        {ledger.outstanding > 0 && row("Outstanding", money(ledger.outstanding), true)}
+        {ledger.outstanding <= 0 && row("Escrow", ledger.escrowAmount != null ? `Held · ${money(ledger.escrowAmount)}` : "Held", true)}
+      </div>
+
+      {sorted.map(a => (
+        <div key={a.id} style={{ border:`1px solid ${P.border}`, borderRadius:8, padding:"10px 12px", marginTop:8 }} data-testid="adjustment-item">
+          <div style={{ display:"flex", justifyContent:"space-between", gap:8 }}>
+            <div style={{ fontWeight:800, fontSize:13 }}>+{money(a.amount)}</div>
+            <div style={{ fontSize:11, fontWeight:700, color: a.status === "FUNDED" ? P.green : ["REJECTED","WITHDRAWN","EXPIRED"].includes(a.status) ? P.muted : P.amber }} data-testid="adjustment-status">
+              {adjustmentStatusLabel(a.status, viewer)}
+            </div>
+          </div>
+          <div style={{ fontSize:12, color:P.secondary, marginTop:4 }}>{a.reason}</div>
+          {viewer === "shipper" && a.status === "PROPOSED" && (
+            <>
+              <div style={{ fontSize:12, color:P.muted, marginTop:6 }}>If approved, total obligation becomes {money(ledger.totalObligation + a.amount)}.</div>
+              <div style={{ display:"flex", gap:6, marginTop:8 }}>
+                <button disabled={busy} onClick={() => run(() => actions.approveAdjustment(a.id))} style={btn(P.green, P.black, { flex:1 })} data-testid="approve-adjustment">Approve</button>
+                <button disabled={busy} onClick={() => run(() => actions.rejectAdjustment(a.id))} style={btn(P.redBg, P.red, { flex:1 })} data-testid="reject-adjustment">Reject</button>
+              </div>
+            </>
+          )}
+          {viewer === "shipper" && a.status === "APPROVED" && (
+            <div style={{ marginTop:8 }}>
+              <div style={{ background:P.amberBg, color:P.amber, borderRadius:8, padding:"8px 10px", fontSize:12, fontWeight:700 }}>Adjustment approved — {money(a.amount)} payment required</div>
+              <input type="tel" inputMode="tel" value={phone} onChange={e => { setPhone(e.target.value); setError(null); }} placeholder="M-Pesa number, e.g. 0712 345 678" data-testid="adjustment-phone"
+                style={{ width:"100%", marginTop:8, padding:"10px 12px", fontSize:14, fontFamily:font, border:`1.5px solid ${P.border}`, borderRadius:8, outline:"none", color:P.black, background:P.white }} />
+              <button disabled={busy || !phone.trim()} onClick={() => fundAdj(a)} style={btn(P.green, P.black, { width:"100%", marginTop:8, opacity: busy || !phone.trim() ? 0.6 : 1 })} data-testid="fund-adjustment">Fund Difference — {money(a.amount)}</button>
+              <div style={{ fontSize:11, color:P.muted, marginTop:6 }}>The difference is added to the booking's escrow until the applicable release conditions are met.</div>
+            </div>
+          )}
+          {viewer !== "shipper" && a.status === "PROPOSED" && (
+            <button disabled={busy} onClick={() => run(() => actions.withdrawAdjustment(a.id))} style={btn(P.bg, P.black, { marginTop:8 })} data-testid="withdraw-adjustment">Withdraw request</button>
+          )}
+        </div>
+      ))}
+
+      {viewer !== "shipper" && !active && !open && (
+        <button onClick={() => { setOpen(true); setError(null); }} style={btn(P.black, P.white, { width:"100%", marginTop:8 })} data-testid="request-adjustment">Request Adjustment</button>
+      )}
+      {viewer !== "shipper" && open && (
+        <div style={{ marginTop:8 }} data-testid="adjustment-form">
+          <div style={{ fontSize:12, color:P.secondary, marginBottom:6 }}>
+            Current agreed price {money(ledger.agreedAmount)}. Approved adjustments so far {money(ledger.approvedAdjustments)}.
+            {allow && <> Remaining allowance {money(allow.remaining)} (max {allow.capPct}%).</>}
+          </div>
+          <AmountInput value={amount} onChange={setAmount} placeholder="Additional amount (KSh)" />
+          <textarea value={reason} onChange={e => setReason(e.target.value)} placeholder="Reason (min. 10 characters)" rows={3} data-testid="adjustment-reason"
+            style={{ width:"100%", marginTop:8, padding:"10px 12px", fontSize:13, fontFamily:font, border:`1.5px solid ${P.border}`, borderRadius:8, outline:"none", resize:"vertical" }} />
+          <div style={{ display:"flex", gap:6, marginTop:8 }}>
+            <button disabled={busy || !amount || !reason.trim()} onClick={submitRequest} style={btn(P.green, P.black, { flex:1, opacity: busy || !amount || !reason.trim() ? 0.6 : 1 })} data-testid="submit-adjustment">Send request</button>
+            <button disabled={busy} onClick={() => { setOpen(false); setError(null); }} style={btn(P.bg, P.black)}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {error && <div style={{ fontSize:12, color:P.red, fontWeight:600, marginTop:6 }} data-testid="adjustment-error">{error}</div>}
+    </div>
+  );
+}

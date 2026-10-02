@@ -418,7 +418,7 @@ function CargoCommerce({ load, commerce }) {
   }
 
   if (booking) {
-    return <AgreedPriceBlock booking={booking} load={{ price: load.postedPrice }} />;
+    return <AgreedPriceBlock booking={booking} load={{ price: load.postedPrice }} finance={commerce.finance[booking.id]} adjActions={commerce.actions} />;
   }
   return (
     <div data-testid="cargo-commerce">
@@ -2451,7 +2451,7 @@ function BackendBookings({ commerce }) {
           <div key={b.id} style={{ ...card, padding:14, marginBottom:8 }}>
             <div style={{ fontSize:15, fontWeight:800, color:C.black, marginBottom:2 }}>{l ? `${l.origin} → ${l.destination}` : b.loadId}</div>
             <div style={{ fontSize:12, color:C.muted, marginBottom:10 }}>{l?.cargo} · {b.id} · {b.status}</div>
-            <AgreedPriceBlock booking={b} load={l} />
+            <AgreedPriceBlock booking={b} load={l} finance={commerce.finance[b.id]} adjActions={commerce.actions} />
           </div>
         );
       })}
@@ -2518,7 +2518,7 @@ export default function BehariFreight({
   }
   function openNotification(n) {
     const offer = commerce.offers.find(o => o.id === n.relatedEntityId);
-    const loadId = offer?.loadId ?? commerce.bookings.find(b => b.id === n.relatedEntityId || b.payment?.paymentId === n.relatedEntityId || b.payment?.escrowId === n.relatedEntityId)?.loadId;
+    const loadId = offer?.loadId ?? commerce.bookings.find(b => b.id === n.relatedEntityId || b.payment?.paymentId === n.relatedEntityId || b.payment?.escrowId === n.relatedEntityId || (commerce.finance[b.id]?.adjustments || []).some(a => a.id === n.relatedEntityId))?.loadId;
     if (loadId && commerce.bookings.some(b => b.loadId === loadId)) { setTab(2); return; }
     if (loadId) { setFocusId(null); setTimeout(() => setFocusId(loadId), 0); setTab(1); }
   }

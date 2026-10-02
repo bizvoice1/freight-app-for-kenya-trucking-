@@ -9,11 +9,12 @@
 import { Router } from "express";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { payments } from "../db/schema.js";
+import { payments, adjustments } from "../db/schema.js";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { stkPush, callbackUrl } from "../services/daraja.js";
 import { logPaymentEvent } from "../services/ledger.js";
+import { isCanonicalKenyanMobile, expireStalePayments, notifyExpired } from "../services/bookingPayment.js";
 import {
   AdjustmentError, getAdjustmentFor, approveAdjustment, rejectAdjustment, withdrawAdjustment,
   beginAdjustmentPayment, abortAdjustmentPayment,
@@ -52,6 +53,11 @@ router.post("/:id/withdraw", requireRole("fleet_owner"), handle(async (req, res)
 /** Funds an APPROVED adjustment. Amount comes from the adjustment row, never the body. */
 router.post("/:id/payment", requireRole("shipper"), handle(async (req, res) => {
   const { phoneNumber, testOutcome, testForceReceipt, testDelayMs } = req.body || {};
+  if (phoneNumber && !isCanonicalKenyanMobile(phoneNumber)) {
+    return res.status(400).json({ error: "phoneNumber must be a Kenyan mobile number in the form 2547XXXXXXXX.", code: "INVALID_PHONE" });
+  }
+  const [adjRow] = await db.select().from(adjustments).where(eq(adjustments.id, req.params.id));
+  if (adjRow) await notifyExpired(expireStalePayments({ bookingId: adjRow.bookingId, requestId: req.id }));
   const { payment, booking } = await beginAdjustmentPayment(req.user, req.params.id, phoneNumber, req.id);
 
   let daraja;

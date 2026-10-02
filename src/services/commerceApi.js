@@ -40,3 +40,17 @@ export const withdrawOffer = (role, offerId) => call(role, "POST", `/api/offers/
 /** Starts an M-Pesa STK push for the booking. Only the phone is sent — the backend decides the amount. */
 export const startBookingPayment = (bookingId, phoneNumber) =>
   call("shipper", "POST", `/api/bookings/${encodeURIComponent(bookingId)}/payment`, { phoneNumber });
+
+// 5D-5 — adjustments over the existing 5D-2 contract. No call here ever sends a payable amount for approve/reject/pay.
+export const fetchBookingFinance = async (role, bookingId) => {
+  const id = encodeURIComponent(bookingId);
+  const [ledger, adjustments] = await Promise.all([call(role, "GET", `/api/bookings/${id}/ledger`), call(role, "GET", `/api/bookings/${id}/adjustments`)]);
+  return ledger.ok && adjustments.ok ? { ok: true, data: { ledger: ledger.data, adjustments: adjustments.data } } : { ok: false, error: ledger.error || adjustments.error };
+};
+export const requestAdjustment = (bookingId, amount, reason, reasonCode = "OTHER") =>
+  call("fleet_owner", "POST", `/api/bookings/${encodeURIComponent(bookingId)}/adjustments`, { amount, reason, reasonCode });
+export const approveAdjustment  = (id) => call("shipper", "POST", `/api/adjustments/${encodeURIComponent(id)}/approve`, {});
+export const rejectAdjustment   = (id) => call("shipper", "POST", `/api/adjustments/${encodeURIComponent(id)}/reject`, {});
+export const withdrawAdjustment = (id) => call("fleet_owner", "POST", `/api/adjustments/${encodeURIComponent(id)}/withdraw`, {});
+export const startAdjustmentPayment = (id, phoneNumber) =>
+  call("shipper", "POST", `/api/adjustments/${encodeURIComponent(id)}/payment`, { phoneNumber });

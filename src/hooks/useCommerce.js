@@ -19,6 +19,7 @@ export function useCommerce(role) {
   const [offers, setOffers] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [bookedLoads, setBookedLoads] = useState({}); // loadId -> load view (for the booking's own party)
+  const [finance, setFinance] = useState({});      // bookingId -> {ledger, adjustments} (backend ledger, never recomputed here)
   const [notifications, setNotifications] = useState([]);
   const [online, setOnline] = useState(true);
   const [ready, setReady] = useState(false);
@@ -45,6 +46,13 @@ export function useCommerce(role) {
         setBookedLoads({ ...bookedRef.current });
       }
     }
+    if (b.ok) {
+      const funded = b.data.filter(x => x.payment?.escrowStatus === "Held");
+      const fin = await Promise.all(funded.map(x => api.fetchBookingFinance(role, x.id)));
+      const next = {};
+      funded.forEach((x, i) => { if (fin[i].ok) next[x.id] = fin[i].data; });
+      setFinance(next);
+    }
     setReady(true);
   }, [role]);
 
@@ -67,7 +75,7 @@ export function useCommerce(role) {
   }, [role]);
 
   return {
-    identity, loads, offers, bookings, bookedLoads, notifications, online, ready, refresh, markRead,
+    identity, loads, offers, bookings, bookedLoads, finance, notifications, online, ready, refresh, markRead,
     threads: groupOfferThreads(offers),
     actions: {
       acceptPostedPrice: wrap(api.acceptPostedPrice),
@@ -76,6 +84,11 @@ export function useCommerce(role) {
       accept: wrap((id) => api.acceptOffer(role, id)),
       reject: wrap((id, reason) => api.rejectOffer(role, id, reason)),
       withdraw: wrap((id) => api.withdrawOffer(role, id)),
+      requestAdjustment: wrap(api.requestAdjustment),
+      approveAdjustment: wrap(api.approveAdjustment),
+      rejectAdjustment: wrap(api.rejectAdjustment),
+      withdrawAdjustment: wrap(api.withdrawAdjustment),
+      fundAdjustment: wrap(api.startAdjustmentPayment),
       fundBooking: wrap((bookingId, phone) => api.startBookingPayment(bookingId, phone)),
     },
   };

@@ -810,7 +810,7 @@ function ShipperCommercePanel({ s, commerce }) {
   if (booking) return (
     <div style={{ marginBottom:16 }}>
       <div style={{ fontSize:11,fontWeight:700,color:C.muted,letterSpacing:0.8,textTransform:"uppercase",marginBottom:8 }}>Booking</div>
-      <AgreedPriceBlock booking={booking} load={{ price:s.pay }} viewer="shipper" onFund={A.fundBooking} />
+      <AgreedPriceBlock booking={booking} load={{ price:s.pay }} viewer="shipper" onFund={A.fundBooking} finance={commerce.finance[booking.id]} adjActions={A} />
     </div>
   );
   return (
@@ -2053,7 +2053,7 @@ export default function BehariShipper({ onPostLoad = ()=>{}, postedLoads = [], n
 
   function openNotification(n) {
     const offer = commerce.offers.find(o => o.id === n.relatedEntityId);
-    const loadId = offer?.loadId ?? commerce.bookings.find(b => b.id === n.relatedEntityId || b.payment?.paymentId === n.relatedEntityId || b.payment?.escrowId === n.relatedEntityId)?.loadId;
+    const loadId = offer?.loadId ?? commerce.bookings.find(b => b.id === n.relatedEntityId || b.payment?.paymentId === n.relatedEntityId || b.payment?.escrowId === n.relatedEntityId || (commerce.finance[b.id]?.adjustments || []).some(a => a.id === n.relatedEntityId))?.loadId;
     const target = allShipments.find(x => x.id === loadId);
     if (target) setDetail(target);
   }

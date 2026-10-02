@@ -23,7 +23,7 @@ import { db, isUniqueConstraintError } from "../db/client.js";
 import { adjustments, bookings, loads, trips, escrows, payments } from "../db/schema.js";
 import {
   ADJUSTMENT_STATUS as S, ADJUSTMENT_SOURCE, REASON_CODE, adjustmentConfig, buildAdjustment,
-  checkCap, validateAdjustmentAmount, validateReason,
+  checkCap, validateAdjustmentAmount, validateReason, maxAdjustmentTotal,
 } from "../domain/adjustment.js";
 import { createPayment, PAYMENT_STATUS } from "../domain/payment.js";
 import { ESCROW_STATUS } from "../domain/escrow.js";
@@ -274,7 +274,12 @@ export async function getBookingLedgerFor(user, bookingId) {
     if (!booking) fail(404, "BOOKING_NOT_FOUND", `No booking found with id ${bookingId}.`);
     if (!canView(user, booking, getLoad(tx, booking.loadId))) fail(403, "FORBIDDEN", "You are not authorized to view this booking.");
     expireStaleSync(tx, bookingId, undefined);
-    return { bookingId, ...loadLedgerSync(tx, bookingId) };
+    const ledger = loadLedgerSync(tx, bookingId);
+    const capPct = adjustmentConfig().maxPct;
+    const max = typeof booking.agreedAmount === "number" ? maxAdjustmentTotal(booking.agreedAmount, capPct) : null;
+    // Display aid only; the cap is enforced by proposeAdjustment + the DB trigger.
+    const allowance = max === null ? null : { capPct, max, used: ledger.approvedAdjustments, remaining: Math.max(0, max - ledger.approvedAdjustments) };
+    return { bookingId, ...ledger, allowance };
   }));
 }
 
