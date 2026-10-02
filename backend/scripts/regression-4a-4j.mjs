@@ -95,8 +95,10 @@ async function main() {
 
   await test("Phase 4F: driver posts a GPS location for their own trip", async () => {
     const jamesDriver = await login("0722100200", "1234", "driver");
-    // Close to the seeded last location (0.5143, 35.2698) — a plausible next reading, not an implausible jump.
-    const r = await api(jamesDriver.token, "POST", "/api/trips/TRP-1000/location", { lat: 0.516, lng: 35.272, accuracy: 10 });
+    // Plausibility is relative to the trip's latest reading, which other runs/tools may have moved off the
+    // seed — so offset from whatever is latest instead of assuming the seeded (0.5143, 35.2698).
+    const latest = (await api(jamesDriver.token, "GET", "/api/trips/TRP-1000/location/latest")).json;
+    const r = await api(jamesDriver.token, "POST", "/api/trips/TRP-1000/location", { lat: latest.lat + 0.0002, lng: latest.lng + 0.0002, accuracy: 10 });
     assert(r.status === 200 && r.json.accepted === true, `location post failed: ${JSON.stringify(r.json)}`);
   });
 
