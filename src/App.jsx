@@ -7,6 +7,9 @@ import { COLORS as C, FONT as font } from "./constants/theme.js";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import NetworkStats from "./components/matching/NetworkStats.jsx";
 import { MARKETPLACE_LOADS } from "./data/loads.js";
+import { getAllKnownLoads } from "./services/loadViews.js";
+import { withSeedGeo } from "./models/geo.js";
+import { resolveRoadDistances, subscribeRoadDistances, applyRoadDistance } from "./services/roadDistance.js";
 import { DEMO_MATCH_CARGO } from "./data/network.js";
 
 // Code-split portals: each bundle loads only when its tab is first opened.
@@ -528,12 +531,17 @@ export default function App() {
     adminForceStatus:   handleAdminForceStatus,
   } = useLoads();
 
+  // "All by road": resolve Google road distances for every load in the background.
+  const [, setRoadTick] = useState(0);
+  useEffect(() => subscribeRoadDistances(() => setRoadTick(t => t + 1)), []);
+  useEffect(() => { resolveRoadDistances([...getAllKnownLoads(), ...DEMO_MATCH_CARGO.map(withSeedGeo)]); }, [postedLoads]);
+
   // ── Matching engine (Truck ↔ Cargo) — independent of useLoads(), wired
   // alongside it into sharedProps/FreightContext so every portal + the
   // landing page can consume it without new prop-drilling.
   const matching = useMatching();
   const matchingCargoPool = [...postedLoads, ...MARKETPLACE_LOADS, ...DEMO_MATCH_CARGO].map(l => ({
-    ...l, status: loadStatuses[l.id] ?? l.status,
+    ...applyRoadDistance(withSeedGeo(l)), status: loadStatuses[l.id] ?? l.status,
   }));
   useEffect(() => {
     matching.refreshNetworkStats(matchingCargoPool);

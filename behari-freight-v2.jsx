@@ -234,7 +234,7 @@ function LoadCard({ load, onBook, currency = "KSh" }) {
           </div>
           <div style={{ textAlign:"right" }}>
             <div style={{ fontSize:22, fontWeight:800, color:C.black, letterSpacing:-0.5, lineHeight:1 }}>{fmtCurr(load.pay, currency)}</div>
-            <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>{currency==="KSh"?`KSh ${load.rateKm}/km`:fmtCurr(Math.round(load.rateKm),currency)+"/km"}</div>
+            {distLabel(load).source!=="unresolved" && <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>{currency==="KSh"?`KSh ${load.rateKm}/km`:fmtCurr(Math.round(load.rateKm),currency)+"/km"}</div>}
           </div>
         </div>
 
@@ -248,9 +248,8 @@ function LoadCard({ load, onBook, currency = "KSh" }) {
             <div style={{ width:1, height:6, background:C.border }} />
             <div style={{ width:36, height:1, background:C.border }} />
             <div style={{ fontSize:10, color:C.muted, fontWeight:600, whiteSpace:"nowrap", textAlign:"center" }} title={distLabel(load).text}>
-              {distLabel(load).approx && load.dist ? "~" : ""}{load.dist} km
+              {distLabel(load).source==="unresolved" ? "Distance n/a" : `${load.dist} km`}
               {load.distSource==="route" && <div style={{ fontSize:9, color:C.green }}>by road</div>}
-              {load.distSource==="haversine" && <div style={{ fontSize:9, color:C.amber||"#B45309" }}>straight-line</div>}
             </div>
             <div style={{ width:36, height:1, background:C.border }} />
             <div style={{ width:6, height:6, borderRadius:"50%", background:C.black }} />

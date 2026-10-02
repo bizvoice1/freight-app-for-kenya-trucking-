@@ -265,7 +265,7 @@ export function createLoadFromForm(formData, existingCount) {
   const fromStr = formData.pickup      || "";
   const toStr   = formData.destination || "";
 
-  // 5C-1 — places + distance hierarchy (route → corridor → haversine → unresolved).
+  // 5C-1 — places + distance hierarchy (route → corridor → unresolved).
   // formData.pickupPlace / deliveryPlace carry {name,placeId,lat,lng} once Places
   // autocomplete exists (5C-2); formData.routeKm carries a real road distance.
   const pickup   = makePlace(fromStr, formData.pickupPlace);
@@ -298,7 +298,7 @@ export function createLoadFromForm(formData, existingCount) {
     pickup,                       // {name, placeId, lat, lng}
     delivery,                     // {name, placeId, lat, lng}
     dist:           distKm,       // km — 0 only if unresolved
-    distSource,                   // "route" | "corridor" | "haversine" | "unresolved"
+    distSource,                   // "route" | "corridor" | "unresolved"
     rateKm,                       // KSh/km = pay ÷ dist
     etaMin:         etaHrs ? etaHrs * 60 : routeEtaMin, // minutes — corridor first, else provider duration
     routePolyline:  formData.routePolyline || null, // encoded road route (5C-2), for maps

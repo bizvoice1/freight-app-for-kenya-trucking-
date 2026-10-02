@@ -10,17 +10,16 @@
  *   1. "route"     — real road distance from a routing provider (Google Routes
  *                    in 5C-2). Passed in as `routeKm`; nothing here fabricates it.
  *   2. "corridor"  — the known corridor table (road km).
- *   3. "haversine" — straight-line distance between two coordinates. NOT road
- *                    distance; it understates it, so it is labelled as such.
- *   4. "unresolved"— km = 0, nothing known.
+ *   3. "unresolved"— km = 0, nothing known. Straight-line (Haversine) distance is
+ *                    deliberately NOT used: it understates road distance and would
+ *                    mislead pricing, so an unknown road distance stays unknown.
  */
 
-import { distanceKm, resolveTownCoord } from "./match.js";
+import { resolveTownCoord } from "./match.js";
 
 export const DIST_SOURCE = {
   ROUTE:      "route",
   CORRIDOR:   "corridor",
-  HAVERSINE:  "haversine",
   UNRESOLVED: "unresolved",
 };
 
@@ -65,10 +64,6 @@ export function resolveDistance({ pickup, delivery, routeKm, corridorKm }) {
   }
   if (Number.isFinite(corridorKm) && corridorKm > 0) {
     return { km: Math.round(corridorKm), source: DIST_SOURCE.CORRIDOR };
-  }
-  if (validCoord(pickup) && validCoord(delivery)) {
-    const km = Math.round(distanceKm(pickup, delivery));
-    if (km > 0) return { km, source: DIST_SOURCE.HAVERSINE };
   }
   return { km: 0, source: DIST_SOURCE.UNRESOLVED };
 }
@@ -128,10 +123,10 @@ export function decodePolyline(str = "") {
 /** User-facing label for how a load's distance was obtained. */
 export function distLabel(load) {
   const km = load?.dist || 0;
-  if (!km) return { text: "Distance n/a", approx: true, source: DIST_SOURCE.UNRESOLVED };
+  // "haversine" = legacy straight-line value stored by an earlier build; never shown as a distance.
+  if (!km || load.distSource === "haversine") return { text: "Distance n/a", approx: true, source: DIST_SOURCE.UNRESOLVED };
   switch (load.distSource) {
     case DIST_SOURCE.ROUTE:     return { text: `${km} km by road`,        approx: false, source: DIST_SOURCE.ROUTE };
-    case DIST_SOURCE.HAVERSINE: return { text: `~${km} km straight-line`, approx: true,  source: DIST_SOURCE.HAVERSINE };
     default:                    return { text: `${km} km`,                approx: false, source: load.distSource || DIST_SOURCE.CORRIDOR };
   }
 }

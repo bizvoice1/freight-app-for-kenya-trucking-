@@ -7,7 +7,7 @@ import { CORRIDORS, CARGO_TYPES, TRUCK_TYPES, CARGO_UNITS, TRUCK_COUNT_OPTIONS }
 // arrays. See src/services/loadViews.js for the merge/formatting logic.
 // data/shipments.js itself is left untouched (not yet deleted).
 import { getAllKnownLoads, toShipperShipmentView } from "./src/services/loadViews.js";
-import { sortNewestFirst, makePlace, resolveDistance, distLabel, DIST_SOURCE, decodePolyline } from "./src/models/geo.js";
+import { sortNewestFirst, makePlace, resolveDistance, distLabel, decodePolyline } from "./src/models/geo.js";
 import PlaceInput from "./src/components/maps/PlaceInput.jsx";
 import GoogleMap from "./src/components/maps/GoogleMap.jsx";
 import { fetchRoadRoute } from "./src/services/routeApi.js";
@@ -91,8 +91,9 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
   const set = (k, v) => setForm(f => ({...f, [k]:v}));
 
   // 5C-2 — once both places are pinned from autocomplete, ask the backend for the
-  // real road distance. Any failure leaves routeKm null → corridor/Haversine.
+  // real road distance. Any failure leaves routeKm null → corridor, else distance stays unresolved.
   const [routeBusy, setRouteBusy] = useState(false);
+  const [placesUsable, setPlacesUsable] = useState(hasMapsKey());
   useEffect(() => {
     const a = form.pickupPlace, b = form.deliveryPlace;
     setForm(f => (f.routeKm == null && !f.routePolyline) ? f : ({...f, routeKm:null, routePolyline:null, routeDurationMin:null}));
@@ -118,6 +119,7 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
   const _sameRoute = form.pickup.trim() && form.pickup.trim().toLowerCase() === form.destination.trim().toLowerCase();
   const _dateInv   = form.pickupDate && form.deadline && form.deadline < form.pickupDate;
   const step1Valid = (
+    (!placesUsable || (form.pickupPlace && form.deliveryPlace)) &&
     form.pickup.trim() &&
     form.destination.trim() &&
     !_sameRoute &&
@@ -206,17 +208,17 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
             ════════════════════════════════════════════════════════ */}
         {step===1 && <>
           <label style={lbl}>Pickup Location</label>
-          <PlaceInput style={inp} theme={{bg:C.white,border:C.border,text:C.black,muted:C.muted,ok:C.green}} placeholder="e.g. Mombasa Port, Gate 3" value={form.pickup} pinned={!!form.pickupPlace}
+          <PlaceInput style={inp} theme={{bg:C.white,border:C.border,text:C.black,muted:C.muted,ok:C.green}} placeholder="e.g. Mombasa Port, Gate 3" value={form.pickup} pinned={!!form.pickupPlace} onUsableChange={setPlacesUsable}
             onChange={(t,pl)=>setForm(f=>({...f, pickup:t, pickupPlace:pl}))} />
 
           <label style={lbl}>Destination</label>
-          <PlaceInput style={inp} theme={{bg:C.white,border:C.border,text:C.black,muted:C.muted,ok:C.green}} placeholder="e.g. Kampala, Nakawa Industrial Area" value={form.destination} pinned={!!form.deliveryPlace}
+          <PlaceInput style={inp} theme={{bg:C.white,border:C.border,text:C.black,muted:C.muted,ok:C.green}} placeholder="e.g. Kampala, Nakawa Industrial Area" value={form.destination} pinned={!!form.deliveryPlace} onUsableChange={setPlacesUsable}
             onChange={(t,pl)=>setForm(f=>({...f, destination:t, deliveryPlace:pl}))} />
-          {(routeBusy || _dist.km > 0) && (
-            <div style={{ fontSize:12, fontWeight:600, color:_distInfo.approx ? C.amber || "#B45309" : C.secondary, marginTop:-6, marginBottom:12 }}>
-              {routeBusy ? "Calculating road distance…" : (_dist.source===DIST_SOURCE.HAVERSINE
-                ? `${_distInfo.text} — road distance unavailable, actual drive will be longer`
-                : `Distance: ${_distInfo.text}`)}
+          {(routeBusy || _dist.km > 0 || (_pp.name && _dp.name)) && (
+            <div style={{ fontSize:12, fontWeight:600, color:_dist.km > 0 || routeBusy ? C.secondary : C.amber || "#B45309", marginTop:-6, marginBottom:12 }}>
+              {routeBusy ? "Calculating road distance…" : (_dist.km > 0
+                ? `Distance: ${_distInfo.text}`
+                : ((form.pickupPlace && form.deliveryPlace) ? "Road distance couldn't be calculated right now — it will show as unavailable" : "Pick both places from the suggestions to continue"))}
             </div>
           )}
 
@@ -1025,7 +1027,7 @@ function DetailModal({ s, onClose, onConfirmDelivery = ()=>{}, escrowData = {}, 
 
         {/* Details */}
         <div style={{ background:C.bg,borderRadius:12,overflow:"hidden",marginBottom:16 }}>
-          {[["Driver",s.driver],["Truck",`${s.truck} · ${s.plate}`],["Distance",(()=>{const d=distLabel(s);return d.source===DIST_SOURCE.HAVERSINE?`${d.text} (not road distance)`:d.text;})()],["Payment",`KSh ${s.pay.toLocaleString()}`]].map(([k,v],i,a)=>(
+          {[["Driver",s.driver],["Truck",`${s.truck} · ${s.plate}`],["Distance",distLabel(s).text],["Payment",`KSh ${s.pay.toLocaleString()}`]].map(([k,v],i,a)=>(
             <div key={k} style={{ display:"flex",justifyContent:"space-between",padding:"12px 16px",borderBottom:i<a.length-1?`1px solid ${C.border}`:"none" }}>
               <span style={{ fontSize:13,color:C.secondary }}>{k}</span>
               <span style={{ fontSize:13,fontWeight:700,color:C.black }}>{v}</span>

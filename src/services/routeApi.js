@@ -4,7 +4,7 @@
  * Phase 5C-2 — asks the Behari backend for the road route between two places.
  * Returns { routeKm, durationMin, polyline } or null on ANY failure (backend
  * down, key not configured, no route, rate limited) so the caller falls back to
- * the corridor / Haversine distance already in models/geo.js.
+ * the known-corridor distance already in models/geo.js.
  */
 import { postJson } from "./trackingApi.js";
 

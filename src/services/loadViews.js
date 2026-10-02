@@ -22,6 +22,7 @@ import { getStoreSnapshot } from "./loadService.js";
 import { MARKETPLACE_LOADS } from "../data/loads.js";
 import { SEED_LOADS } from "../data/seedLoads.js";
 import { withSeedGeo, ratePerKm } from "../models/geo.js";
+import { applyRoadDistance } from "./roadDistance.js";
 
 // Seed/legacy loads get places + a deterministic historical createdAt once.
 const GEO_MARKETPLACE = MARKETPLACE_LOADS.map(withSeedGeo);
@@ -42,7 +43,7 @@ export function getAllKnownLoads() {
   const known = new Map();
   [...GEO_MARKETPLACE, ...GEO_SEED, ...snap.postedLoads.map(withSeedGeo)].forEach(l => known.set(l.id, l));
   return [...known.values()].map(l => ({
-    ...l,
+    ...applyRoadDistance(l),
     status: snap.loadStatuses[l.id] ?? l.status,
   }));
 }

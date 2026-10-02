@@ -3,6 +3,7 @@
  * Without a Maps key, or if Google rejects the call, it is a plain text input,
  * so posting a load never depends on Google.
  *
+ * onUsableChange(bool) — false when autocomplete is unavailable, so the caller can drop the pick-a-suggestion requirement.
  * onChange(text, place) — place is {name, placeId, lat, lng} once the user picks
  * a suggestion, and null as soon as they edit the text afterwards.
  */
@@ -11,7 +12,7 @@ import { hasMapsKey, loadGoogleMaps } from "../../services/googleMaps.js";
 
 const REGIONS = ["ke", "ug", "tz", "rw", "ss", "et"];
 
-export default function PlaceInput({ value, onChange, placeholder, style, marginBottom = 12, pinned = false, theme = {} }) {
+export default function PlaceInput({ value, onChange, placeholder, style, marginBottom = 12, pinned = false, theme = {}, onUsableChange }) {
   const [items, setItems]   = useState([]);
   const [open, setOpen]     = useState(false);
   const [active, setActive] = useState(-1);
@@ -33,6 +34,8 @@ export default function PlaceInput({ value, onChange, placeholder, style, margin
     });
     return () => { alive = false; clearTimeout(timerRef.current); };
   }, []);
+
+  useEffect(() => { onUsableChange?.(usable); }, [usable]); // eslint-disable-line
 
   useEffect(() => {
     const close = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };

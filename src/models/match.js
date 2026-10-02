@@ -56,6 +56,8 @@ export const TOWN_COORDS = {
   "nairobi":     { lat:-1.2921, lng:36.8219 },
   "jkia":        { lat:-1.3192, lng:36.9275 },
   "thika":       { lat:-1.0333, lng:37.0693 },
+  "mlolongo":    { lat:-1.3887, lng:36.9385 },
+  "syokimau":    { lat:-1.3567, lng:36.9347 },
   "naivasha":    { lat:-0.7132, lng:36.4313 },
   "nakuru":      { lat:-0.3031, lng:36.0800 },
   "kericho":     { lat:-0.3664, lng:35.2836 },
