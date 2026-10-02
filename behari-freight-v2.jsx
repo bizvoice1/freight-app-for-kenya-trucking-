@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from "react";
 // filter-chip list (not load identity data) and stays imported directly.
 import { TRUCK_FILTERS } from "./src/data/loads.js";
 import { getAllKnownLoads, toCarrierMarketplaceView, toCarrierTripView } from "./src/services/loadViews.js";
+import { sortNewestFirst } from "./src/models/geo.js";
 import { CARRIER_FLEET_SEED as CARRIER_FLEET } from "./src/data/fleet.js";
 // DEMO_MATCH_CARGO is deliberately NOT part of SEED_LOADS/getAllKnownLoads():
 // it's synthetic matching-engine demo cargo (crafted to exercise exact/
@@ -530,7 +531,7 @@ function fmtCurr(ksh, currency) {
 function FindLoads({ onBook, allLoads = LOADS }) {
   const [filter, setFilter] = useState("All");
   const [search, setSearch] = useState("");
-  const [sort, setSort]     = useState("rate");
+  const [sort, setSort]     = useState("new");
   const [currency, setCurrency] = useState("KSh");
   const [minPay, setMinPay] = useState("");
   const [maxPay, setMaxPay] = useState("");
@@ -540,6 +541,7 @@ function FindLoads({ onBook, allLoads = LOADS }) {
     .filter(l => !search || [l.from,l.to,l.cargo].some(s => s.toLowerCase().includes(search.toLowerCase())))
     .filter(l => !minPay || l.pay >= Number(minPay))
     .filter(l => !maxPay || l.pay <= Number(maxPay));
+  if (sort === "new")   loads = sortNewestFirst(loads);
   if (sort === "rate")  loads = [...loads].sort((a,b) => b.rateKm - a.rateKm);
   if (sort === "price") loads = [...loads].sort((a,b) => b.pay - a.pay);
   if (sort === "near")  loads = [...loads].sort((a,b) => a.dist - b.dist);
@@ -577,7 +579,7 @@ function FindLoads({ onBook, allLoads = LOADS }) {
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,gap:8,overflowX:"auto",scrollbarWidth:"none" }}>
           <div style={{ fontSize:13,color:C.muted,fontWeight:500,flexShrink:0 }}>{loads.length} loads</div>
           <div style={{ display:"flex",gap:4,flexShrink:0 }}>
-            {[["rate","Best Rate"],["price","Highest Pay"],["near","Nearest"]].map(([v,l]) => (
+            {[["new","Newest"],["rate","Best Rate"],["price","Highest Pay"],["near","Nearest"]].map(([v,l]) => (
               <button key={v} onClick={()=>setSort(v)} style={{
                 background:sort===v?C.black:"transparent",color:sort===v?C.white:C.muted,
                 border:`1px solid ${sort===v?C.black:C.border}`,borderRadius:100,padding:"5px 10px",

@@ -7,6 +7,7 @@ import { CORRIDORS, CARGO_TYPES, TRUCK_TYPES, CARGO_UNITS, TRUCK_COUNT_OPTIONS }
 // arrays. See src/services/loadViews.js for the merge/formatting logic.
 // data/shipments.js itself is left untouched (not yet deleted).
 import { getAllKnownLoads, toShipperShipmentView } from "./src/services/loadViews.js";
+import { sortNewestFirst } from "./src/models/geo.js";
 // Step 8: Rating dimensions
 import { CARRIER_RATING_DIMS } from "./src/models/rating.js";
 // Matching engine — shared UI components (Truck ↔ Cargo)
@@ -1377,7 +1378,7 @@ function Dashboard({ onPost, onDetail, allShipments = [] }) {
   // Phase 3B: allShipments already comes fully merged (canonical load +
   // live booking + loadStatuses override) from getAllKnownLoads() +
   // toShipperShipmentView() in the root component — no local merge needed.
-  const active = allShipments.filter(s => s.status !== "Delivered");
+  const active = sortNewestFirst(allShipments.filter(s => s.status !== "Delivered"));
   return (
     <div style={{ padding:12 }}>
       <div style={{ background:C.black,borderRadius:12,padding:"18px 16px",marginBottom:12 }}>

@@ -21,6 +21,11 @@
 import { getStoreSnapshot } from "./loadService.js";
 import { MARKETPLACE_LOADS } from "../data/loads.js";
 import { SEED_LOADS } from "../data/seedLoads.js";
+import { withSeedGeo, ratePerKm } from "../models/geo.js";
+
+// Seed/legacy loads get places + a deterministic historical createdAt once.
+const GEO_MARKETPLACE = MARKETPLACE_LOADS.map(withSeedGeo);
+const GEO_SEED        = SEED_LOADS.map(withSeedGeo);
 
 /**
  * The single merged, de-duplicated, status-corrected load list. Every
@@ -35,7 +40,7 @@ import { SEED_LOADS } from "../data/seedLoads.js";
 export function getAllKnownLoads() {
   const snap = getStoreSnapshot();
   const known = new Map();
-  [...MARKETPLACE_LOADS, ...SEED_LOADS, ...snap.postedLoads].forEach(l => known.set(l.id, l));
+  [...GEO_MARKETPLACE, ...GEO_SEED, ...snap.postedLoads.map(withSeedGeo)].forEach(l => known.set(l.id, l));
   return [...known.values()].map(l => ({
     ...l,
     status: snap.loadStatuses[l.id] ?? l.status,
@@ -68,7 +73,7 @@ const STATUS_PROGRESS_FALLBACK = {
 export function toCarrierMarketplaceView(load) {
   return {
     ...load,
-    rateKm: load.rateKm ?? (load.dist ? Math.round((load.pay || 0) / load.dist) : 0),
+    rateKm: load.rateKm || ratePerKm(load.pay || 0, load.dist || 0),
     facilRating: load.facilRating ?? load.rating ?? 0,
     urgent: !!load.urgent,
   };

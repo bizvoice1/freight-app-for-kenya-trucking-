@@ -32,8 +32,31 @@ export function generateLoadId(existingCount) {
  * @param {string} [data.truckType]
  * @param {number} [data.price]
  * @param {string} [data.pickupDate]
+ * @param {{name?:string,placeId?:string,lat?:number,lng?:number}} [data.pickup]
+ * @param {{name?:string,placeId?:string,lat?:number,lng?:number}} [data.delivery]
  * @param {number} existingCount
  */
+const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/**
+ * Validates an optional {name, placeId, lat, lng} place. Returns
+ * { ok:true, place } (place fields null when absent) or { ok:false, error }.
+ * lat and lng must be supplied together and be in range.
+ */
+export function parsePlace(raw, label) {
+  if (raw == null) return { ok: true, place: { name: null, placeId: null, lat: null, lng: null } };
+  if (typeof raw !== "object" || Array.isArray(raw)) return { ok: false, error: `${label} must be an object.` };
+  const hasLat = raw.lat != null, hasLng = raw.lng != null;
+  if (hasLat !== hasLng) return { ok: false, error: `${label} needs both lat and lng, or neither.` };
+  if (hasLat) {
+    if (num(raw.lat) == null || num(raw.lng) == null || Math.abs(raw.lat) > 90 || Math.abs(raw.lng) > 180) {
+      return { ok: false, error: `${label} lat/lng are out of range.` };
+    }
+  }
+  const str = (v) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 200) : null);
+  return { ok: true, place: { name: str(raw.name), placeId: str(raw.placeId), lat: num(raw.lat), lng: num(raw.lng) } };
+}
+
 export function createLoad(data, existingCount) {
   const now = new Date().toISOString();
   return {
@@ -46,6 +69,14 @@ export function createLoad(data, existingCount) {
     truckType:   data.truckType || null,
     price:       typeof data.price === "number" ? data.price : null,
     pickupDate:  data.pickupDate || null,
+    pickupName:      data.pickupPlace?.name || data.origin,
+    pickupPlaceId:   data.pickupPlace?.placeId ?? null,
+    pickupLat:       data.pickupPlace?.lat ?? null,
+    pickupLng:       data.pickupPlace?.lng ?? null,
+    deliveryName:    data.deliveryPlace?.name || data.destination,
+    deliveryPlaceId: data.deliveryPlace?.placeId ?? null,
+    deliveryLat:     data.deliveryPlace?.lat ?? null,
+    deliveryLng:     data.deliveryPlace?.lng ?? null,
     status:      LOAD_STATUS.OPEN,
     createdAt:   now,
     updatedAt:   now,

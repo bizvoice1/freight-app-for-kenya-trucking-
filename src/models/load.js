@@ -35,6 +35,8 @@
  *   import { LOAD_STATUS } from '../models/load.js';
  *   if (load.status === LOAD_STATUS.DELIVERED) { ... }
  */
+import { makePlace, resolveDistance, ratePerKm } from "./geo.js";
+
 export const LOAD_STATUS = {
   ESCROW_HELD:          "Escrow Held",          // Posted; payment locked; no carrier yet
   ACCEPTED:             "Accepted",              // Carrier accepted; awaiting loading
@@ -263,21 +265,24 @@ export function createLoadFromForm(formData, existingCount) {
   const fromStr = formData.pickup      || "";
   const toStr   = formData.destination || "";
 
-  // Corridor distance / rate lookup — populates dist, rateKm, and etaMin
-  // so that user-posted loads show real numbers, not "0 km / 0 min".
+  // 5C-1 — places + distance hierarchy (route → corridor → haversine → unresolved).
+  // formData.pickupPlace / deliveryPlace carry {name,placeId,lat,lng} once Places
+  // autocomplete exists (5C-2); formData.routeKm carries a real road distance.
+  const pickup   = makePlace(fromStr, formData.pickupPlace);
+  const delivery = makePlace(toStr,   formData.deliveryPlace);
   const corridor = lookupCorridor(fromStr, toStr);
-  const distKm   = corridor ? corridor.distKm : 0;
+  const { km: distKm, source: distSource } = resolveDistance({
+    pickup, delivery, routeKm: Number(formData.routeKm), corridorKm: corridor?.distKm,
+  });
   const etaHrs   = corridor ? corridor.etaHrs : 0;
   const budget   = Math.max(0, Number(formData.budget) || 0);
-  // Prefer corridor benchmark rate; fall back to budget÷dist if dist known
-  const rateKm   = corridor
-    ? corridor.rateKm
-    : (distKm > 0 ? Math.round(budget / distKm) : 0);
+  const rateKm   = ratePerKm(budget, distKm);
 
   return {
     // Identity
     id,
     postedAt:       today,
+    createdAt:      Date.now(),
 
     // Cargo
     cargo:          formData.cargoType  || "",
@@ -289,8 +294,11 @@ export function createLoadFromForm(formData, existingCount) {
     // Route
     from:           fromStr,
     to:             toStr,
-    dist:           distKm,       // km — 0 if corridor unknown
-    rateKm,                       // KSh/km — 0 if corridor unknown
+    pickup,                       // {name, placeId, lat, lng}
+    delivery,                     // {name, placeId, lat, lng}
+    dist:           distKm,       // km — 0 only if unresolved
+    distSource,                   // "route" | "corridor" | "haversine" | "unresolved"
+    rateKm,                       // KSh/km = pay ÷ dist
     etaMin:         etaHrs * 60,  // minutes — for carrier portal ETA display
 
     // Equipment

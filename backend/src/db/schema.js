@@ -168,6 +168,15 @@ export const loads = sqliteTable("loads", {
   truckType:   text("truck_type"),
   price:       real("price"),
   pickupDate:  text("pickup_date"),
+  // Phase 5C-1 — nullable so pre-existing rows and text-only posts stay valid.
+  pickupName:       text("pickup_name"),
+  pickupPlaceId:    text("pickup_place_id"),
+  pickupLat:        real("pickup_lat"),
+  pickupLng:        real("pickup_lng"),
+  deliveryName:     text("delivery_name"),
+  deliveryPlaceId:  text("delivery_place_id"),
+  deliveryLat:      real("delivery_lat"),
+  deliveryLng:      real("delivery_lng"),
   status:      text("status").notNull(), // "Open" | "Booked" | "Cancelled"
   createdAt:   text("created_at").notNull(),
   updatedAt:   text("updated_at").notNull(),

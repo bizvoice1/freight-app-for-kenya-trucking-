@@ -6,11 +6,11 @@
  */
 
 import { Router } from "express";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { db, isUniqueConstraintError } from "../db/client.js";
 import { loads, bookings } from "../db/schema.js";
 import { requireAuth, requireRole } from "../auth/middleware.js";
-import { createLoad, LOAD_STATUS } from "../domain/load.js";
+import { createLoad, parsePlace, LOAD_STATUS } from "../domain/load.js";
 import { createBooking } from "../domain/booking.js";
 import { NOTIFICATION_TYPE } from "../domain/notification.js";
 import { notifyUsers, allTransporterUserIds } from "../services/notifications.js";
@@ -21,13 +21,17 @@ router.use(requireAuth);
 
 /** POST /api/loads — a shipper posts a new load. */
 router.post("/", requireRole("shipper"), asyncHandler(async (req, res) => {
-  const { cargo, origin, destination, weight, truckType, price, pickupDate } = req.body || {};
+  const { cargo, origin, destination, weight, truckType, price, pickupDate, pickup, delivery } = req.body || {};
   if (!cargo || !origin || !destination) {
     return res.status(400).json({ error: "cargo, origin and destination are required." });
   }
+  const pickupParsed = parsePlace(pickup, "pickup");
+  if (!pickupParsed.ok) return res.status(400).json({ error: pickupParsed.error });
+  const deliveryParsed = parsePlace(delivery, "delivery");
+  if (!deliveryParsed.ok) return res.status(400).json({ error: deliveryParsed.error });
 
   const count = (await db.select().from(loads)).length;
-  const load = createLoad({ shipperId: req.user.id, cargo, origin, destination, weight, truckType, price, pickupDate }, count);
+  const load = createLoad({ shipperId: req.user.id, cargo, origin, destination, weight, truckType, price, pickupDate, pickupPlace: pickupParsed.place, deliveryPlace: deliveryParsed.place }, count);
   await db.insert(loads).values(load);
 
   // Phase 4L — marketplace-wide, not targeted: there's no backend matching
@@ -69,9 +73,10 @@ router.get("/", asyncHandler(async (req, res) => {
   if (status)             conditions.push(eq(loads.status, status));
   if (effectiveShipperId) conditions.push(eq(loads.shipperId, effectiveShipperId));
 
+  // Newest first (5C-1); id is a tiebreaker for loads created in the same instant.
   const rows = conditions.length
-    ? await db.select().from(loads).where(and(...conditions))
-    : await db.select().from(loads);
+    ? await db.select().from(loads).where(and(...conditions)).orderBy(desc(loads.createdAt), desc(loads.id))
+    : await db.select().from(loads).orderBy(desc(loads.createdAt), desc(loads.id));
   res.json(rows);
 }));
 
