@@ -12,6 +12,7 @@ import escrowRoutes from "./routes/escrows.js";
 import payoutRoutes from "./routes/payouts.js";
 import darajaWebhookRoutes from "./routes/darajaWebhooks.js";
 import notificationRoutes from "./routes/notifications.js";
+import geoRoutes from "./routes/geo.js";
 
 export const app = express();
 
@@ -82,6 +83,7 @@ app.use("/api/payments", paymentRoutes);
 app.use("/api/escrows", escrowRoutes);
 app.use("/api/payouts", payoutRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/geo", geoRoutes);
 
 /**
  * Phase 4M — every async route handler is now wrapped in asyncHandler

@@ -7,7 +7,11 @@ import { CORRIDORS, CARGO_TYPES, TRUCK_TYPES, CARGO_UNITS, TRUCK_COUNT_OPTIONS }
 // arrays. See src/services/loadViews.js for the merge/formatting logic.
 // data/shipments.js itself is left untouched (not yet deleted).
 import { getAllKnownLoads, toShipperShipmentView } from "./src/services/loadViews.js";
-import { sortNewestFirst } from "./src/models/geo.js";
+import { sortNewestFirst, makePlace, resolveDistance, distLabel, DIST_SOURCE, decodePolyline } from "./src/models/geo.js";
+import PlaceInput from "./src/components/maps/PlaceInput.jsx";
+import GoogleMap from "./src/components/maps/GoogleMap.jsx";
+import { fetchRoadRoute } from "./src/services/routeApi.js";
+import { hasMapsKey } from "./src/services/googleMaps.js";
 // Step 8: Rating dimensions
 import { CARRIER_RATING_DIMS } from "./src/models/rating.js";
 // Matching engine — shared UI components (Truck ↔ Cargo)
@@ -77,6 +81,7 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
   const [loadingMatches,setLoadingMatches]= useState(false);
   const [form, setForm] = useState({
     pickup:"", destination:"", cargoType:"", description:"",
+    pickupPlace:null, deliveryPlace:null, routeKm:null, routePolyline:null, routeDurationMin:null, // 5C-2
     weight:"", unit:"Tonnes", truckType:"", truckCount:"1", pickupDate:"", deadline:"", penalty:"", budget:"", phone:"+254 7",
     recurring:false, recurFreq:"weekly",
     auctionMode:false, // Feature 10
@@ -84,6 +89,27 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
   });
 
   const set = (k, v) => setForm(f => ({...f, [k]:v}));
+
+  // 5C-2 — once both places are pinned from autocomplete, ask the backend for the
+  // real road distance. Any failure leaves routeKm null → corridor/Haversine.
+  const [routeBusy, setRouteBusy] = useState(false);
+  useEffect(() => {
+    const a = form.pickupPlace, b = form.deliveryPlace;
+    setForm(f => (f.routeKm == null && !f.routePolyline) ? f : ({...f, routeKm:null, routePolyline:null, routeDurationMin:null}));
+    if (!a || !b) { setRouteBusy(false); return; }
+    let alive = true;
+    setRouteBusy(true);
+    fetchRoadRoute(a, b).then(r => {
+      if (!alive) return;
+      setRouteBusy(false);
+      if (r) setForm(f => ({...f, routeKm:r.routeKm, routePolyline:r.polyline, routeDurationMin:r.durationMin}));
+    });
+    return () => { alive = false; };
+  }, [form.pickupPlace?.placeId, form.deliveryPlace?.placeId]);
+
+  const _pp = makePlace(form.pickup, form.pickupPlace), _dp = makePlace(form.destination, form.deliveryPlace);
+  const _dist = resolveDistance({ pickup:_pp, delivery:_dp, routeKm:Number(form.routeKm) });
+  const _distInfo = distLabel({ dist:_dist.km, distSource:_dist.source });
 
   const inp = { width:"100%", background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, padding:"12px 14px", fontSize:14, fontFamily:font, color:C.black, outline:"none", marginBottom:12, fontWeight:500, boxSizing:"border-box" };
   const lbl = { display:"block", fontSize:11, fontWeight:700, color:C.secondary, letterSpacing:0.8, textTransform:"uppercase", marginBottom:5 };
@@ -180,10 +206,19 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
             ════════════════════════════════════════════════════════ */}
         {step===1 && <>
           <label style={lbl}>Pickup Location</label>
-          <input style={inp} placeholder="e.g. Mombasa Port, Gate 3" value={form.pickup} onChange={e=>set("pickup",e.target.value)} />
+          <PlaceInput style={inp} theme={{bg:C.white,border:C.border,text:C.black,muted:C.muted,ok:C.green}} placeholder="e.g. Mombasa Port, Gate 3" value={form.pickup} pinned={!!form.pickupPlace}
+            onChange={(t,pl)=>setForm(f=>({...f, pickup:t, pickupPlace:pl}))} />
 
           <label style={lbl}>Destination</label>
-          <input style={inp} placeholder="e.g. Kampala, Nakawa Industrial Area" value={form.destination} onChange={e=>set("destination",e.target.value)} />
+          <PlaceInput style={inp} theme={{bg:C.white,border:C.border,text:C.black,muted:C.muted,ok:C.green}} placeholder="e.g. Kampala, Nakawa Industrial Area" value={form.destination} pinned={!!form.deliveryPlace}
+            onChange={(t,pl)=>setForm(f=>({...f, destination:t, deliveryPlace:pl}))} />
+          {(routeBusy || _dist.km > 0) && (
+            <div style={{ fontSize:12, fontWeight:600, color:_distInfo.approx ? C.amber || "#B45309" : C.secondary, marginTop:-6, marginBottom:12 }}>
+              {routeBusy ? "Calculating road distance…" : (_dist.source===DIST_SOURCE.HAVERSINE
+                ? `${_distInfo.text} — road distance unavailable, actual drive will be longer`
+                : `Distance: ${_distInfo.text}`)}
+            </div>
+          )}
 
           <label style={lbl}>Cargo Type</label>
           <select style={inp} value={form.cargoType} onChange={e=>{ const v=e.target.value; setForm(f=>({...f, cargoType:v, unit: v==="Vehicle" ? "Vehicles" : f.unit})); }}>
@@ -990,7 +1025,7 @@ function DetailModal({ s, onClose, onConfirmDelivery = ()=>{}, escrowData = {}, 
 
         {/* Details */}
         <div style={{ background:C.bg,borderRadius:12,overflow:"hidden",marginBottom:16 }}>
-          {[["Driver",s.driver],["Truck",`${s.truck} · ${s.plate}`],["Payment",`KSh ${s.pay.toLocaleString()}`]].map(([k,v],i,a)=>(
+          {[["Driver",s.driver],["Truck",`${s.truck} · ${s.plate}`],["Distance",(()=>{const d=distLabel(s);return d.source===DIST_SOURCE.HAVERSINE?`${d.text} (not road distance)`:d.text;})()],["Payment",`KSh ${s.pay.toLocaleString()}`]].map(([k,v],i,a)=>(
             <div key={k} style={{ display:"flex",justifyContent:"space-between",padding:"12px 16px",borderBottom:i<a.length-1?`1px solid ${C.border}`:"none" }}>
               <span style={{ fontSize:13,color:C.secondary }}>{k}</span>
               <span style={{ fontSize:13,fontWeight:700,color:C.black }}>{v}</span>
@@ -1959,7 +1994,25 @@ function ShipperTrackingModal({ s, onClose }) {
   const idx = Math.floor((pct/100) * (route.length-1));
   const truckPos = route[Math.min(idx, route.length-1)];
 
+  // Phase 5C-2: Google map with the real road route when a key is configured and
+  // the load has coordinates; otherwise the original Leaflet simulation.
+  const [gmFailed, setGmFailed] = useState(false);
+  const roadPath = s.routePolyline ? decodePolyline(s.routePolyline) : null;
+  const pk = s.pickup, dl = s.delivery;
+  const hasGeo = Number.isFinite(pk?.lat) && Number.isFinite(dl?.lat);
+  const useGoogle = hasMapsKey() && hasGeo && !gmFailed;
+  const liveLoc = live.location && Number.isFinite(live.location.lat) ? live.location : null;
+  let simPos = null;
+  if (hasGeo) {
+    if (roadPath && roadPath.length > 1) simPos = roadPath[Math.min(roadPath.length - 1, Math.floor((pct / 100) * (roadPath.length - 1)))];
+    else simPos = { lat: pk.lat + (dl.lat - pk.lat) * pct / 100, lng: pk.lng + (dl.lng - pk.lng) * pct / 100 };
+  }
+  const truckMarker = liveLoc
+    ? { id: "truck", lat: liveLoc.lat, lng: liveLoc.lng, label: "🚛 Live", color: "#06C167" }
+    : simPos ? { id: "truck", lat: simPos.lat, lng: simPos.lng, label: `🚛 ${pct}% (simulated)`, color: "#06C167" } : null;
+
   useEffect(() => {
+    if (useGoogle) return;
     if (!document.getElementById("leaflet-css")) {
       const link = document.createElement("link");
       link.id = "leaflet-css"; link.rel = "stylesheet";
@@ -1988,7 +2041,7 @@ function ShipperTrackingModal({ s, onClose }) {
       document.head.appendChild(sc);
     }
     return () => { if (leafRef.current) { leafRef.current.remove(); leafRef.current = null; } };
-  }, []);
+  }, [useGoogle]);
 
   return (
     <div style={{ position:"fixed",inset:0,zIndex:500,display:"flex",alignItems:"flex-end",justifyContent:"center",fontFamily:font }}>
@@ -2010,9 +2063,24 @@ function ShipperTrackingModal({ s, onClose }) {
         <div style={{ padding:"0 18px", marginBottom:14 }}>
           <LiveTrackingPanel {...live} truckPlate={s.plate} />
         </div>
-        <div style={{ padding:"0 18px 8px", fontSize:11, color:C.muted, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase" }}>Simulated route</div>
+        <div style={{ padding:"0 18px 8px", fontSize:11, color:C.muted, fontWeight:700, letterSpacing:0.8, textTransform:"uppercase" }}>
+          {useGoogle ? (roadPath ? "Road route" : "Route (straight line — road route unavailable)") : "Simulated route"}
+        </div>
         <div style={{ margin:"0 18px 14px",borderRadius:12,overflow:"hidden",height:220,background:"#17192C" }}>
-          <div ref={mapRef} style={{ width:"100%",height:"100%" }} />
+          {useGoogle ? (
+            <GoogleMap
+              height={220}
+              path={roadPath || [{ lat: pk.lat, lng: pk.lng }, { lat: dl.lat, lng: dl.lng }]}
+              markers={[
+                { id: "pickup",   lat: pk.lat, lng: pk.lng, label: `Pickup: ${s.from}`,  color: "#06C167" },
+                { id: "delivery", lat: dl.lat, lng: dl.lng, label: `Drop: ${s.to}`,      color: "#276EF1" },
+                ...(truckMarker ? [truckMarker] : []),
+              ]}
+              onUnavailable={() => setGmFailed(true)}
+            />
+          ) : (
+            <div ref={mapRef} style={{ width:"100%",height:"100%" }} />
+          )}
         </div>
         <div style={{ display:"flex",gap:8,padding:"0 18px",marginBottom:14 }}>
           {[["Driver",s.driver],["Truck",s.plate||"—"],["ETA",s.eta||"TBD"]].map(([l,v])=>(

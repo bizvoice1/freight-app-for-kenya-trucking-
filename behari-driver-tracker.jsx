@@ -15,6 +15,8 @@ import { useState, useEffect, useCallback } from "react";
 // backend/api/trucks — see getTruckLabel below.
 import { getTruckById } from "./src/services/fleetService.js";
 import { ACTIVE_TRIP_STATUSES } from "./src/models/trip.js";
+import GoogleMap from "./src/components/maps/GoogleMap.jsx";
+import { hasMapsKey } from "./src/services/googleMaps.js";
 import {
   loginDriver,
   getCurrentDriverUser,
@@ -164,6 +166,7 @@ function TrackerScreen({ tripId, driverName, onSwitchTrip, onExit }) {
   const [truck, setTruck] = useState(null);
   const [state, setState] = useState(getTrackingState(tripId));
   const [now, setNow]     = useState(Date.now()); // ticks the "updated Ns ago" label
+  const [mapFailed, setMapFailed] = useState(false);
 
   useEffect(() => {
     getMyTrips().then(all => {
@@ -245,6 +248,17 @@ function TrackerScreen({ tripId, driverName, onSwitchTrip, onExit }) {
             {loc ? fmtCoord(loc.lat, "N", "S") : "Waiting for signal…"}
             {loc && <><br />{fmtCoord(loc.lng, "E", "W")}</>}
           </div>
+
+          {loc && hasMapsKey() && !mapFailed && (
+            <div style={{ borderRadius:12, overflow:"hidden", marginBottom:20, border:`1px solid ${C.border}` }}>
+              <GoogleMap
+                height={200}
+                follow
+                markers={[{ id:"me", lat:loc.lat, lng:loc.lng, label:"You", color:"#06C167" }]}
+                onUnavailable={() => setMapFailed(true)}
+              />
+            </div>
+          )}
 
           <div style={{ display:"flex", gap:10, marginBottom:24 }}>
             <div style={{ flex:1, background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"12px 14px" }}>

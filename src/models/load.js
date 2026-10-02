@@ -275,6 +275,7 @@ export function createLoadFromForm(formData, existingCount) {
     pickup, delivery, routeKm: Number(formData.routeKm), corridorKm: corridor?.distKm,
   });
   const etaHrs   = corridor ? corridor.etaHrs : 0;
+  const routeEtaMin = Number(formData.routeDurationMin) > 0 ? Number(formData.routeDurationMin) : 0;
   const budget   = Math.max(0, Number(formData.budget) || 0);
   const rateKm   = ratePerKm(budget, distKm);
 
@@ -299,7 +300,8 @@ export function createLoadFromForm(formData, existingCount) {
     dist:           distKm,       // km — 0 only if unresolved
     distSource,                   // "route" | "corridor" | "haversine" | "unresolved"
     rateKm,                       // KSh/km = pay ÷ dist
-    etaMin:         etaHrs * 60,  // minutes — for carrier portal ETA display
+    etaMin:         etaHrs ? etaHrs * 60 : routeEtaMin, // minutes — corridor first, else provider duration
+    routePolyline:  formData.routePolyline || null, // encoded road route (5C-2), for maps
 
     // Equipment
     truck:          formData.truckType  || "Any Available",

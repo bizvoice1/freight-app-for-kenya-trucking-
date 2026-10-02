@@ -6,7 +6,9 @@ import { useState, useEffect, useRef } from "react";
 // filter-chip list (not load identity data) and stays imported directly.
 import { TRUCK_FILTERS } from "./src/data/loads.js";
 import { getAllKnownLoads, toCarrierMarketplaceView, toCarrierTripView } from "./src/services/loadViews.js";
-import { sortNewestFirst } from "./src/models/geo.js";
+import { sortNewestFirst, distLabel, decodePolyline } from "./src/models/geo.js";
+import GoogleMap from "./src/components/maps/GoogleMap.jsx";
+import { hasMapsKey } from "./src/services/googleMaps.js";
 import { CARRIER_FLEET_SEED as CARRIER_FLEET } from "./src/data/fleet.js";
 // DEMO_MATCH_CARGO is deliberately NOT part of SEED_LOADS/getAllKnownLoads():
 // it's synthetic matching-engine demo cargo (crafted to exercise exact/
@@ -159,6 +161,26 @@ function LeafletMap({ loadCount }) {
   );
 }
 
+/* ── LOADS MAP (Google when a key is configured, else Leaflet) ───────── */
+function LoadsMap({ loads }) {
+  const [gmFailed, setGmFailed] = useState(!hasMapsKey());
+  if (gmFailed) return <LeafletMap loadCount={loads.length} />;
+  const markers = loads
+    .filter(l => Number.isFinite(l.pickup?.lat) && Number.isFinite(l.pickup?.lng))
+    .map(l => ({ id:l.id, lat:l.pickup.lat, lng:l.pickup.lng, label:`KSh ${Math.round(l.pay/1000)}k`, title:`${l.from} → ${l.to}`, color:l.urgent ? "#E11900" : "#06C167" }));
+  return (
+    <div style={{ position:"relative", height:200 }}>
+      <GoogleMap markers={markers} height={200} onUnavailable={() => setGmFailed(true)} />
+      <div style={{ position:"absolute",top:10,right:52,background:"#06C167",borderRadius:100,padding:"4px 12px",fontSize:11,fontWeight:700,color:"#000",fontFamily:font,pointerEvents:"none" }}>
+        {loads.length} loads
+      </div>
+      <div style={{ position:"absolute",left:8,bottom:8,background:"rgba(255,255,255,0.92)",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700,color:"#111",fontFamily:font,pointerEvents:"none" }}>
+        Pins mark pickup locations
+      </div>
+    </div>
+  );
+}
+
 /* ── STATUS COLOURS ─────────────────────────────────────── */
 // TRUCK_FILTERS, CARRIER_FLEET are imported from the data layer.
 // MARKETPLACE_LOADS/MY_TRIPS_SEED are no longer imported here as of Phase 3C
@@ -225,7 +247,11 @@ function LoadCard({ load, onBook, currency = "KSh" }) {
           <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}>
             <div style={{ width:1, height:6, background:C.border }} />
             <div style={{ width:36, height:1, background:C.border }} />
-            <div style={{ fontSize:10, color:C.muted, fontWeight:600, whiteSpace:"nowrap" }}>{load.dist} km</div>
+            <div style={{ fontSize:10, color:C.muted, fontWeight:600, whiteSpace:"nowrap", textAlign:"center" }} title={distLabel(load).text}>
+              {distLabel(load).approx && load.dist ? "~" : ""}{load.dist} km
+              {load.distSource==="route" && <div style={{ fontSize:9, color:C.green }}>by road</div>}
+              {load.distSource==="haversine" && <div style={{ fontSize:9, color:C.amber||"#B45309" }}>straight-line</div>}
+            </div>
             <div style={{ width:36, height:1, background:C.border }} />
             <div style={{ width:6, height:6, borderRadius:"50%", background:C.black }} />
           </div>
@@ -470,7 +496,7 @@ function BookModal({ load, onClose, onBookLoad, activePlates = new Set(), fraudF
           {[
             ["Pickup",    `${load.pickD}, ${load.pickT}`],
             ["Delivery",  `${load.delD}, ${load.delT}`],
-            ["Distance",  load.dist ? `${load.dist} km` : "TBD"],
+            ["Distance",  load.dist ? distLabel(load).text : "TBD"],
             ["Weight",    load.weight],
             ["Equipment", load.truck],
             ...(load.truckCount > 0 ? [["Trucks",`${load.truckCount} needed · ${load.trucksRemaining} remaining`]] : []),
@@ -549,7 +575,7 @@ function FindLoads({ onBook, allLoads = LOADS }) {
   return (
     <div>
       {/* Map hero */}
-      <LeafletMap loadCount={loads.length} />
+      <LoadsMap loads={loads} />
 
       <div style={{ padding:"12px 12px 0" }}>
         {/* Search */}
@@ -1494,8 +1520,24 @@ function TripGPSModal({ trip, onClose }) {
     return () => clearInterval(iv);
   }, [trip]);
 
+  // Phase 5C-2: Google map with the real road route when the trip's load has
+  // coordinates and a key is configured; otherwise the Leaflet simulation.
+  const [gmFailed, setGmFailed] = useState(false);
+  const pk = trip.pickup, dl = trip.delivery;
+  const hasGeo = Number.isFinite(pk?.lat) && Number.isFinite(dl?.lat);
+  const useGoogle = hasMapsKey() && hasGeo && !gmFailed;
+  const roadPath = trip.routePolyline ? decodePolyline(trip.routePolyline) : null;
+  let gPos = null;
+  if (useGoogle) {
+    const f = Math.max(0, Math.min(1, simSnap.progressPct / 100));
+    gPos = roadPath && roadPath.length > 1
+      ? roadPath[Math.min(roadPath.length - 1, Math.floor(f * (roadPath.length - 1)))]
+      : { lat: pk.lat + (dl.lat - pk.lat) * f, lng: pk.lng + (dl.lng - pk.lng) * f };
+  }
+
   // Leaflet GPS map
   useEffect(() => {
+    if (useGoogle) return;
     if (!document.getElementById("leaflet-css")) {
       const link = document.createElement("link");
       link.id = "leaflet-css"; link.rel = "stylesheet";
@@ -1540,7 +1582,7 @@ function TripGPSModal({ trip, onClose }) {
       document.head.appendChild(s);
     }
     return () => { if (leafRef.current) { leafRef.current.map.remove(); leafRef.current = null; } };
-  }, []); // init once
+  }, [useGoogle]); // init once per map provider
 
   // Update truck marker position when progress changes
   useEffect(() => {
@@ -1574,7 +1616,20 @@ function TripGPSModal({ trip, onClose }) {
 
         {/* Map */}
         <div style={{ margin:"14px 18px",borderRadius:12,overflow:"hidden",height:200,background:"#17192C" }}>
-          <div ref={mapRef} style={{ width:"100%",height:"100%" }} />
+          {useGoogle ? (
+            <GoogleMap
+              height={200}
+              path={roadPath || [{ lat: pk.lat, lng: pk.lng }, { lat: dl.lat, lng: dl.lng }]}
+              markers={[
+                { id: "pickup",   lat: pk.lat, lng: pk.lng, label: trip.from, color: "#06C167" },
+                { id: "delivery", lat: dl.lat, lng: dl.lng, label: trip.to,   color: "#276EF1" },
+                { id: "truck",    lat: gPos.lat, lng: gPos.lng, label: "🚛", color: "#06C167" },
+              ]}
+              onUnavailable={() => setGmFailed(true)}
+            />
+          ) : (
+            <div ref={mapRef} style={{ width:"100%",height:"100%" }} />
+          )}
         </div>
 
         {/* Speed + progress strip */}

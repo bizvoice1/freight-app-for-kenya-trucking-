@@ -59,8 +59,16 @@ async function _get(path, role) {
 
 /** Finds the backend trip for a Load id, or null if that load has no live-tracked trip. */
 export async function findTripByLoadId(loadId, role = "shipper") {
-  const rows = await _get(`/api/trips?loadId=${encodeURIComponent(loadId)}`, role);
-  return rows?.[0] || null;
+  try {
+    const rows = await _get(`/api/trips?loadId=${encodeURIComponent(loadId)}`, role);
+    return rows?.[0] || null;
+  } catch (e) {
+    // The backend answers 403 (not 404) for any loadId outside the caller's scope, so
+    // frontend-only seed loads (e.g. KE-2041) look the same as someone else's load.
+    // For this lookup both mean "no backend-tracked trip you can see".
+    if (/\(403\)/.test(e.message)) return null;
+    throw e;
+  }
 }
 
 /** Every backend trip currently bound to a truck (there's at most one active one in practice). */
@@ -80,4 +88,16 @@ export async function getLatestLocation(tripId, role = "shipper") {
 
 export async function getLocationHistory(tripId, role = "shipper") {
   return (await _get(`/api/trips/${tripId}/location/history`, role)) || [];
+}
+
+/** Authenticated JSON POST to the backend (used by the 5C-2 route-distance call). Returns {status, json}. */
+export async function postJson(path, body, role = "shipper") {
+  const token = await _ensureToken(role);
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  let json = null; try { json = await res.json(); } catch {}
+  return { status: res.status, json };
 }
