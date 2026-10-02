@@ -14,7 +14,7 @@
 /* ── Dimension definitions ───────────────────────────────────────────────── */
 
 export const CARRIER_RATING_DIMS = [
-  { id:"timeliness",     label:"On-time delivery",   icon:"⏱",  desc:"Did the carrier meet pickup and delivery deadlines?" },
+  { id:"timeliness",     label:"On-time delivery",   icon:"⏱",  desc:"Did the transporter meet pickup and delivery deadlines?" },
   { id:"communication",  label:"Communication",       icon:"💬",  desc:"Responsive and professional during the trip?" },
   { id:"cargoHandling",  label:"Cargo handling",      icon:"📦",  desc:"Were goods delivered in good condition?" },
   { id:"professionalism",label:"Professionalism",     icon:"⭐",  desc:"Overall conduct, documentation, and compliance?" },

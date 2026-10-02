@@ -907,7 +907,7 @@ function TripCard({ t, onAccept, onReject, onCancel, onConfirmLoading, onStartTr
           />
           <div style={{ display:"flex",gap:8 }}>
             <button onClick={()=>setModal(null)} style={{ flex:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font,color:C.black }}>Keep Load</button>
-            <button onClick={()=>{ setModal(null); run(()=>onCancel(t.id, inputA||"Cancelled by carrier")); }} style={{ flex:2,background:C.red,color:C.white,border:"none",borderRadius:8,padding:"12px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font }}>Cancel Shipment</button>
+            <button onClick={()=>{ setModal(null); run(()=>onCancel(t.id, inputA||"Cancelled by transporter")); }} style={{ flex:2,background:C.red,color:C.white,border:"none",borderRadius:8,padding:"12px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font }}>Cancel Shipment</button>
           </div>
         </ActionModal>
       )}
@@ -975,12 +975,12 @@ function TripCard({ t, onAccept, onReject, onCancel, onConfirmLoading, onStartTr
 
       {/* ── Dispute Modal (Step 7) ── */}
       {modal === "dispute" && (
-        <DisputeOpenModal trip={t} raisedBy="Carrier" onClose={()=>setModal(null)} onOpenDispute={onOpenDispute||((x)=>Promise.resolve(x))} />
+        <DisputeOpenModal trip={t} raisedBy="Transporter" onClose={()=>setModal(null)} onOpenDispute={onOpenDispute||((x)=>Promise.resolve(x))} />
       )}
 
       {/* ── Chat Modal ── */}
       {modal === "chat" && (
-        <ChatModal loadId={t.id} title={`${t.cargo} · ${t.id}`} currentUser="Carrier" onClose={()=>setModal(null)} />
+        <ChatModal loadId={t.id} title={`${t.cargo} · ${t.id}`} currentUser="Transporter" onClose={()=>setModal(null)} />
       )}
     </>
   );
@@ -1102,17 +1102,26 @@ function Earnings({ myTrips = [] }) {
 
       <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",marginBottom:8 }}>Recent Payouts</div>
       <div style={{ ...card,overflow:"hidden",marginBottom:16 }}>
-        {recentTrips.map((t,i,a) => (
+        {recentTrips.map((t,i,a) => {
+          // Bug fix: this only special-cased "In Transit" as pending, so
+          // every OTHER non-paid status (Accepted, Loading, Arrived,
+          // Delivery Confirmed, even Disputed/Cancelled) fell through to
+          // the "already paid" branch and showed a green +KSh amount for
+          // money that hadn't actually moved. Use the same Paid Out/
+          // Delivered check paidTrips above already uses, just inverted.
+          const isPaid = t.status === "Paid Out" || t.status === "Delivered";
+          return (
           <div key={t.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",borderBottom:i<a.length-1?`1px solid ${C.border}`:"none" }}>
             <div>
               <div style={{ fontSize:14,fontWeight:600,color:C.black }}>{t.cargo}</div>
               <div style={{ fontSize:12,color:C.muted }}>{t.from} → {t.to} · {t.date}</div>
             </div>
-            <div style={{ fontSize:15,fontWeight:800,color:t.status==="In Transit"?C.amber:C.green }}>
-              {t.status==="In Transit"?"Pending":`+KSh ${t.pay.toLocaleString()}`}
+            <div style={{ fontSize:15,fontWeight:800,color:isPaid?C.green:C.amber }}>
+              {isPaid?`+KSh ${t.pay.toLocaleString()}`:"Pending"}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Advance pay CTA */}
@@ -1655,7 +1664,7 @@ function RatingModal({ trip, raterRole = "carrier", onClose, onSubmitRating }) {
         <div style={{ width:36,height:4,background:C.border,borderRadius:2,margin:"12px auto 20px" }} />
 
         <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",marginBottom:4 }}>
-          Rate {raterRole === "carrier" ? "Shipper" : "Carrier"}
+          Rate {raterRole === "carrier" ? "Shipper" : "Transporter"}
         </div>
         <div style={{ fontSize:20,fontWeight:800,color:C.black,marginBottom:2 }}>{rateeId}</div>
         <div style={{ fontSize:13,color:C.secondary,marginBottom:20 }}>{trip.cargo} · {trip.id}</div>
@@ -1701,7 +1710,7 @@ function RatingModal({ trip, raterRole = "carrier", onClose, onSubmitRating }) {
 }
 
 /* ── DISPUTE OPEN MODAL (Step 7) ─────────────────────────── */
-function DisputeOpenModal({ trip, raisedBy = "Carrier", onClose, onOpenDispute }) {
+function DisputeOpenModal({ trip, raisedBy = "Transporter", onClose, onOpenDispute }) {
   const [reason,   setReason]   = useState("");
   const [evidence, setEvidence] = useState("");
   const [photos,   setPhotos]   = useState([]); // [{name, dataUrl}]
@@ -1964,7 +1973,7 @@ function MyProfileModal({ onClose }) {
         </div>
 
         <div style={{ display:"flex",gap:8 }}>
-          <button onClick={()=>{ navigator.clipboard.writeText("https://behari.co.ke/carrier/james-mwangi").catch(()=>{}); setCopied(true); setTimeout(()=>setCopied(false),2500); }} style={{ flex:1,background:copied?C.greenBg:C.bg,color:copied?C.green:C.black,border:`1px solid ${copied?C.green:C.border}`,borderRadius:10,padding:"12px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font,transition:"all 0.2s" }}>
+          <button onClick={()=>{ navigator.clipboard.writeText("https://behari.co.ke/transporter/james-mwangi").catch(()=>{}); setCopied(true); setTimeout(()=>setCopied(false),2500); }} style={{ flex:1,background:copied?C.greenBg:C.bg,color:copied?C.green:C.black,border:`1px solid ${copied?C.green:C.border}`,borderRadius:10,padding:"12px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font,transition:"all 0.2s" }}>
             {copied?"✓ Copied!":"🔗 Copy Link"}
           </button>
           <button onClick={onClose} style={{ flex:1,background:C.black,color:C.white,border:"none",borderRadius:10,padding:"12px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font }}>Done</button>
@@ -2315,7 +2324,7 @@ function MyFleetLive() {
 
 function MyTruck({ allLoads = [], truckAvailabilities = [], onDeclareAvailability = ()=>{}, onFindMatchesForTruck = ()=>{}, onAcceptMatch = ()=>{}, onBook = ()=>{} }) {
   const [declaring, setDeclaring]         = useState(false);
-  const [showForm, setShowForm]           = useState(true);
+  const [showForm, setShowForm]           = useState(false);
   const [viewingId, setViewingId]         = useState(null);
   const [matchesForView, setMatchesForView] = useState([]);
   const [loadingMatches, setLoadingMatches] = useState(false);
@@ -2450,13 +2459,13 @@ function Toast({ message, onDone }) {
 /* ── ROOT ───────────────────────────────────────────────── */
 const LANG_KEY_CARRIER = "behari_lang_carrier";
 const I18N_CARRIER = {
-  en: { myTruck:"My Truck", find:"Find Loads", myLoads:"My Loads", earnings:"Earnings", account:"Account", history:"History", carrier:"CARRIER APP · KENYA" },
-  sw: { myTruck:"Gari Yangu", find:"Tafuta Mzigo", myLoads:"Mizigo Yangu", earnings:"Mapato", account:"Akaunti", history:"Historia", carrier:"APP YA CARRIER · KENYA" },
+  en: { myTruck:"My Truck", find:"Find Loads", myLoads:"My Loads", earnings:"Earnings", account:"Account", history:"History", carrier:"TRANSPORTER APP · KENYA" },
+  sw: { myTruck:"Gari Yangu", find:"Tafuta Mzigo", myLoads:"Mizigo Yangu", earnings:"Mapato", account:"Akaunti", history:"Historia", carrier:"APP YA TRANSPORTER · KENYA" },
 };
 
 const NAV = [
-  { id:0, label:"My Truck",   icon:"🚛" },
   { id:1, label:"Find Loads", icon:"⊞" },
+  { id:0, label:"My Truck",   icon:"🚛" },
   { id:2, label:"My Loads",   icon:"≡"  },
   { id:3, label:"Earnings",   icon:"◎"  },
   { id:4, label:"Account",    icon:"◯"  },
@@ -2486,7 +2495,7 @@ export default function BehariFreight({
   truckAvailabilities=[], onDeclareAvailability=()=>{}, onFindMatchesForTruck=()=>{}, onAcceptMatch=()=>{},
   matchNotifications=[], onMarkNotificationRead=()=>{},
 }) {
-  const [tab, setTab]       = useState(0);
+  const [tab, setTab]       = useState(1);
   const [booking, setBooking] = useState(null);
   // Flow C — "new match found" toast. Checks for any unread notification
   // (not just growth since last render) because this portal fully remounts

@@ -105,7 +105,7 @@ export const SEED_LOADS = [
     pickD:"May 24", pickT:"6:00 AM", delD:"May 24", delT:"8:00 PM",
     pay:68500, penalty:0, shipper:"Steel & Tube", phone:"", rating:4.9, facilRating:4.6, urgent:false,
     status:"Escrow Held", progress:5, driver:null, plate:null, truckType:"Lowbed",
-    eta:"TBD", ping:"Awaiting carrier", date:"May 16",
+    eta:"TBD", ping:"Awaiting transporter", date:"May 16",
   },
 
   /* ── KE-2043 — clean, complementary fields only. ───────────────────────── */
@@ -154,7 +154,7 @@ export const SEED_LOADS = [
     pickD:"May 23", pickT:"7:00 AM", delD:"May 23", delT:"10:00 AM",
     pay:22000, penalty:0, shipper:"China Wu Yi", phone:"", rating:4.5, facilRating:4.0, urgent:true,
     status:"Escrow Held", progress:0, driver:null, plate:null, truckType:"Tipper",
-    eta:"TBD", ping:"Awaiting carrier", date:"May 23",
+    eta:"TBD", ping:"Awaiting transporter", date:"May 23",
   },
   {
     id:"KE-2047", cargo:"Red Murram", description:"",
@@ -163,7 +163,7 @@ export const SEED_LOADS = [
     pickD:"May 24", pickT:"6:00 AM", delD:"May 24", delT:"8:30 AM",
     pay:18000, penalty:0, shipper:"Mombasa Cement", phone:"", rating:4.3, facilRating:3.8, urgent:false,
     status:"Escrow Held", progress:0, driver:null, plate:null, truckType:"Tipper",
-    eta:"TBD", ping:"Awaiting carrier", date:"May 24",
+    eta:"TBD", ping:"Awaiting transporter", date:"May 24",
   },
   {
     id:"KE-2048", cargo:"Sand & Hardcore", description:"",
@@ -172,7 +172,7 @@ export const SEED_LOADS = [
     pickD:"May 25", pickT:"5:30 AM", delD:"May 25", delT:"9:00 AM",
     pay:25000, penalty:0, shipper:"KenGen Ltd", phone:"", rating:4.7, facilRating:4.1, urgent:false,
     status:"Escrow Held", progress:0, driver:null, plate:null, truckType:"Tipper",
-    eta:"TBD", ping:"Awaiting carrier", date:"May 25",
+    eta:"TBD", ping:"Awaiting transporter", date:"May 25",
   },
 
   /* ── KE-2030 / 2021 / 2015 — shipper history only; no driver/shipper

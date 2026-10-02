@@ -37,7 +37,7 @@ function useWindowWidth() {
 
 /* ── Sign-In Modal ─────────────────────────────────────────── */
 const ROLES = [
-  { id:"driver",  label:"Carrier",  icon:"🚛", sub:"Find & book loads" },
+  { id:"driver",  label:"Transporter",  icon:"🚛", sub:"Find & book loads" },
   { id:"shipper", label:"Shipper",  icon:"📦", sub:"Post cargo & track shipments" },
   { id:"admin",   label:"Admin",    icon:"⚙",  sub:"Operations & KYC dashboard" },
 ];
@@ -158,7 +158,7 @@ function SignInModal({ onClose, onSuccess }) {
 
             <div style={{ textAlign:"center",marginTop:16,fontSize:13,color:C.muted }}>
               New transporter?{" "}
-              <span onClick={onClose} style={{ color:C.black,fontWeight:700,cursor:"pointer",textDecoration:"underline",textUnderlineOffset:2 }}>Register as a Carrier</span>
+              <span onClick={onClose} style={{ color:C.black,fontWeight:700,cursor:"pointer",textDecoration:"underline",textUnderlineOffset:2 }}>Register as a Transporter</span>
             </div>
           </>
         ) : (
@@ -264,14 +264,14 @@ function AboutModal({ onClose }) {
       <div style={{ background:C.bg,padding:"60px 24px" }}>
         <div style={{ maxWidth:640,margin:"0 auto" }}>
           <div style={{ fontSize:11,fontWeight:700,color:C.green,letterSpacing:1.2,textTransform:"uppercase",marginBottom:12 }}>How It Works</div>
-          <h2 style={{ fontSize:28,fontWeight:800,color:C.black,letterSpacing:-0.5,marginBottom:36 }}>Simple for shippers. Liberating for carriers.</h2>
+          <h2 style={{ fontSize:28,fontWeight:800,color:C.black,letterSpacing:-0.5,marginBottom:36 }}>Simple for shippers. Liberating for transporters.</h2>
 
           <div style={{ display:"flex",flexDirection:"column",gap:0 }}>
             {[
               { n:"01", title:"Shipper posts a load",     body:"A company in Nairobi needs 10 tonnes of steel coils moved to Mombasa. They post the load on Behari — cargo type, route, budget, pickup time. It goes live in under 2 minutes.", icon:"📦" },
-              { n:"02", title:"Carrier books & escrow locks", body:"A verified carrier sees the load, accepts it, and M-Pesa instantly locks the full payment in escrow. The driver knows the money is real and waiting. No more ghosting.", icon:"🔒" },
+              { n:"02", title:"Transporter books & escrow locks", body:"A verified transporter sees the load, accepts it, and M-Pesa instantly locks the full payment in escrow. The driver knows the money is real and waiting. No more ghosting.", icon:"🔒" },
               { n:"03", title:"Goods move, payment releases", body:"The truck picks up, the shipper tracks delivery in real time. The moment the delivery is confirmed — on both sides — M-Pesa releases the funds straight to the driver's number. Same day.", icon:"🚛" },
-              { n:"04", title:"KYC keeps everyone safe",    body:"Every carrier goes through document verification before their first load — National ID, Driver's Licence CE, GIT Insurance, NTSA Inspection, Truck Logbook, and KRA PIN. Shippers know exactly who is driving their goods.", icon:"✅" },
+              { n:"04", title:"KYC keeps everyone safe",    body:"Every transporter goes through document verification before their first load — National ID, Driver's Licence CE, GIT Insurance, NTSA Inspection, Truck Logbook, and KRA PIN. Shippers know exactly who is driving their goods.", icon:"✅" },
             ].map((s,i,a) => (
               <div key={s.n} style={{ display:"flex",gap:20,paddingBottom: i<a.length-1?32:0,marginBottom: i<a.length-1?32:0,borderBottom: i<a.length-1?`1px solid ${C.border}`:"none" }}>
                 <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:0,flexShrink:0 }}>
@@ -298,7 +298,7 @@ function AboutModal({ onClose }) {
             {[
               { icon:"📱", title:"M-Pesa Native",      body:"Every payment flows through Safaricom's Daraja API. No bank account needed — for shippers or drivers." },
               { icon:"🔐", title:"Escrow Protection",  body:"Funds are held in a secure escrow until delivery is confirmed. Neither party can lose out." },
-              { icon:"📋", title:"Digital KYC",        body:"Full document verification online — ID, licence, insurance, logbook. Approve carriers in under 24 hours." },
+              { icon:"📋", title:"Digital KYC",        body:"Full document verification online — ID, licence, insurance, logbook. Approve transporters in under 24 hours." },
               { icon:"📍", title:"Live Tracking",      body:"Shippers see where their cargo is in real time. Drivers get turn-by-turn visibility on active loads." },
               { icon:"⚖",  title:"Dispute Resolution", body:"Our ops team mediates any delivery dispute within 2 business hours with a clear resolution process." },
               { icon:"🌍", title:"Built for Kenya",    body:"Nairobi–Mombasa. Eldoret–Kisumu. Kampala corridor. Routes, rates, and regulations designed for East Africa." },
@@ -319,7 +319,7 @@ function AboutModal({ onClose }) {
           <h2 style={{ fontSize:30,fontWeight:900,color:C.white,letterSpacing:-0.8,lineHeight:1.1,marginBottom:16 }}>
             Ready to move freight<br />the <span style={{ color:C.green }}>right way?</span>
           </h2>
-          <p style={{ fontSize:15,color:"rgba(255,255,255,0.5)",lineHeight:1.7,marginBottom:32 }}>Join 312 verified carriers and dozens of shippers already using Behari Freight across Kenya.</p>
+          <p style={{ fontSize:15,color:"rgba(255,255,255,0.5)",lineHeight:1.7,marginBottom:32 }}>Join 312 verified transporters and dozens of shippers already using Behari Freight across Kenya.</p>
           <div style={{ display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap",marginBottom:32 }}>
             <button onClick={onClose} style={{ background:C.green,color:C.black,border:"none",borderRadius:8,padding:"13px 28px",fontSize:15,fontWeight:800,cursor:"pointer",fontFamily:font }}>
               Get Started →
@@ -359,12 +359,12 @@ function LegalModal({ onClose, initialTab = "terms" }) {
             <p style={{ fontSize:12,color:C.muted,marginBottom:28 }}>Last updated: 1 May 2026 · Effective immediately</p>
             {[
               { title:"1. Acceptance", body:'By accessing or using the Behari Freight platform ("Platform"), you agree to be bound by these Terms of Service and all applicable laws and regulations of the Republic of Kenya. If you do not agree, do not use the Platform.' },
-              { title:"2. Services Provided", body:"Behari Freight provides a digital marketplace connecting shippers (cargo owners) with carriers (truck operators). We do not own, operate, or insure any trucks. We provide the matching, escrow, and communication infrastructure." },
-              { title:"3. Escrow Payments", body:"All payments are held in M-Pesa escrow via Safaricom's Daraja API. Funds are released to the carrier only after the shipper confirms delivery via OTP and photo proof. Behari retains a 2% platform fee on each transaction." },
-              { title:"4. KYC & Verification", body:"Carriers must complete Know Your Customer (KYC) verification before their first booking, including National ID, Driver's Licence (Class CE), GIT Insurance certificate, NTSA vehicle inspection, and KRA PIN. Shippers must provide a valid M-Pesa-registered phone number." },
+              { title:"2. Services Provided", body:"Behari Freight provides a digital marketplace connecting shippers (cargo owners) with transporters (truck operators). We do not own, operate, or insure any trucks. We provide the matching, escrow, and communication infrastructure." },
+              { title:"3. Escrow Payments", body:"All payments are held in M-Pesa escrow via Safaricom's Daraja API. Funds are released to the transporter only after the shipper confirms delivery via OTP and photo proof. Behari retains a 2% platform fee on each transaction." },
+              { title:"4. KYC & Verification", body:"Transporters must complete Know Your Customer (KYC) verification before their first booking, including National ID, Driver's Licence (Class CE), GIT Insurance certificate, NTSA vehicle inspection, and KRA PIN. Shippers must provide a valid M-Pesa-registered phone number." },
               { title:"5. Dispute Resolution", body:"Disputes are reviewed by Behari's operations team within 2 business hours. Both parties must respond within 24 hours of being contacted. The Platform's decision on escrow distribution following a dispute investigation is final." },
-              { title:"6. Carrier Obligations", body:"Carriers are responsible for maintaining valid insurance, roadworthiness certificates, and a current NTSA inspection sticker. Carriers must handle cargo with due care and report any incidents immediately via the app." },
-              { title:"7. Shipper Obligations", body:"Shippers must accurately describe cargo — type, weight, hazardous classification, and packaging. Misrepresentation that causes carrier losses may result in forfeiture of the shipper's escrow refund." },
+              { title:"6. Transporter Obligations", body:"Transporters are responsible for maintaining valid insurance, roadworthiness certificates, and a current NTSA inspection sticker. Transporters must handle cargo with due care and report any incidents immediately via the app." },
+              { title:"7. Shipper Obligations", body:"Shippers must accurately describe cargo — type, weight, hazardous classification, and packaging. Misrepresentation that causes transporter losses may result in forfeiture of the shipper's escrow refund." },
               { title:"8. Prohibited Uses", body:"The Platform may not be used to transport contraband, weapons, controlled substances, or any goods prohibited under Kenyan law. Behari reserves the right to terminate accounts and report violations to relevant authorities." },
               { title:"9. Limitation of Liability", body:"Behari Freight Ltd's liability is limited to the transaction value of the disputed load. We are not liable for consequential, indirect, or incidental damages arising from use of the Platform." },
               { title:"10. Governing Law", body:"These Terms are governed by the laws of Kenya. Any disputes shall be subject to the jurisdiction of the courts of Nairobi, Kenya." },
@@ -385,8 +385,8 @@ function LegalModal({ onClose, initialTab = "terms" }) {
             <h1 style={{ fontSize:26,fontWeight:800,color:C.black,letterSpacing:-0.5,marginBottom:6 }}>Privacy Policy</h1>
             <p style={{ fontSize:12,color:C.muted,marginBottom:28 }}>Last updated: 1 May 2026 · Behari Freight Ltd, Nairobi</p>
             {[
-              { title:"Data We Collect", body:"We collect your phone number (for M-Pesa and OTP), name, ID number, vehicle registration, GPS location during active trips, and usage data within the app. Carriers additionally provide licence and insurance documents." },
-              { title:"How We Use Your Data", body:"Your data is used to match loads and carriers, process payments, verify identity, investigate disputes, and improve the Platform. We do not sell your data to third parties." },
+              { title:"Data We Collect", body:"We collect your phone number (for M-Pesa and OTP), name, ID number, vehicle registration, GPS location during active trips, and usage data within the app. Transporters additionally provide licence and insurance documents." },
+              { title:"How We Use Your Data", body:"Your data is used to match loads and transporters, process payments, verify identity, investigate disputes, and improve the Platform. We do not sell your data to third parties." },
               { title:"M-Pesa & Financial Data", body:"Payment processing is handled by Safaricom via the Daraja API. Behari does not store full M-Pesa credentials. Transaction records are retained for 7 years per Kenyan financial regulations." },
               { title:"Location Data", body:"GPS coordinates are collected during active trips only. Location data is visible to the shipper of the active load and the Behari operations team. Location is not collected when you are not on an active trip." },
               { title:"Document Storage", body:"KYC documents (ID scans, licences, insurance) are stored on encrypted servers. Documents are deleted 30 days after account termination." },
@@ -408,7 +408,7 @@ function LegalModal({ onClose, initialTab = "terms" }) {
 }
 
 const PORTALS = [
-  { id:"driver",  label:"Carrier App",     sub:"Find & book loads",         icon:"🚛", component:BehariFreight },
+  { id:"driver",  label:"Transporter App",     sub:"Find & book loads",         icon:"🚛", component:BehariFreight },
   { id:"shipper", label:"Shipper Portal",   sub:"Post cargo & track loads",  icon:"📦", component:BehariShipper },
   { id:"pay",     label:"M-Pesa Escrow",    sub:"Payment & escrow engine",   icon:"📱", component:BehariPay     },
   { id:"admin",   label:"Admin Dashboard",  sub:"Operations & KYC centre",   icon:"⚙", component:BehariAdmin   },
@@ -417,7 +417,7 @@ const PORTALS = [
 ];
 
 const NAV_LABELS = {
-  driver:"Carrier", shipper:"Shipper", pay:"M-Pesa", admin:"Admin", tracker:"Driver Tracker", marketplace:"Marketplace"
+  driver:"Transporter", shipper:"Shipper", pay:"M-Pesa", admin:"Admin", tracker:"Driver Tracker", marketplace:"Marketplace"
 };
 
 // Which portals each role can access
@@ -437,7 +437,7 @@ const ROLE_ACCESS = {
 };
 
 const ROLE_NAMES = {
-  driver:"Carrier", shipper:"Shipper", admin:"Admin", tracker:"Driver", marketplace:"Marketplace"
+  driver:"Transporter", shipper:"Shipper", admin:"Admin", tracker:"Driver", marketplace:"Marketplace"
 };
 
 export default function App() {
@@ -474,7 +474,7 @@ export default function App() {
         try {
           const next = JSON.parse(e.newValue);
           const unread = next.filter(n => !n.read).length;
-          if (unread > 0) setCrossTabAlert(`🔔 ${unread} new carrier notification${unread>1?"s":""}`);
+          if (unread > 0) setCrossTabAlert(`🔔 ${unread} new transporter notification${unread>1?"s":""}`);
         } catch {}
       }
     }
@@ -662,7 +662,7 @@ export default function App() {
               <div style={{ fontSize:11,fontWeight:700,color:C.secondary,letterSpacing:0.8,textTransform:"uppercase",marginBottom:8 }}>Switch Portal</div>
               <div style={{ display:"flex",gap:8,marginBottom:20 }}>
                 {[
-                  { r:"driver",  label:"Carrier",  icon:"🚛" },
+                  { r:"driver",  label:"Transporter",  icon:"🚛" },
                   { r:"shipper", label:"Shipper",  icon:"📦" },
                   { r:"admin",   label:"Admin",    icon:"⚙"  },
                 ].filter(p => p.r !== role).map(p => (
@@ -789,7 +789,7 @@ export default function App() {
         </div>
         <div style={{ display:"flex",gap:16,alignItems:"center" }}>
           {!isMobile && <span onClick={() => setShowAbout(true)} style={{ fontSize:13,color:C.secondary,fontWeight:500,cursor:"pointer" }}>About</span>}
-          {!isMobile && <span style={{ fontSize:13,color:C.secondary,fontWeight:500,cursor:"pointer" }}>Carriers</span>}
+          {!isMobile && <span style={{ fontSize:13,color:C.secondary,fontWeight:500,cursor:"pointer" }}>Transporters</span>}
           {!isMobile && <span style={{ fontSize:13,color:C.secondary,fontWeight:500,cursor:"pointer" }}>Shippers</span>}
           <button onClick={() => setSigningIn(true)} style={{ background:C.black,color:C.white,border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:font }}>Sign In</button>
         </div>
@@ -819,7 +819,7 @@ export default function App() {
           </div>
           <div style={{ marginTop:16, display:"flex", gap:20, justifyContent:"center", flexWrap:"wrap" }}>
             <button onClick={()=>setRegistering(true)} style={{ background:"transparent",color:C.green,border:"none",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font,textDecoration:"underline",textUnderlineOffset:3 }}>
-              New transporter? Register as a Carrier →
+              New transporter? Register as a Transporter →
             </button>
             <button onClick={()=>signIn("tracker")} style={{ background:"transparent",color:"rgba(255,255,255,0.6)",border:"none",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font,textDecoration:"underline",textUnderlineOffset:3 }}>
               📍 I'm a driver — open Driver Tracker →
@@ -850,7 +850,7 @@ export default function App() {
           <div style={{ background:C.black,borderRadius:12,padding:"24px",marginBottom:16,display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"center",gap:16 }}>
             <div>
               <div style={{ fontSize:11,color:"rgba(255,255,255,0.45)",fontWeight:700,letterSpacing:1,textTransform:"uppercase",marginBottom:4 }}>New Transporter?</div>
-              <div style={{ fontSize:18,fontWeight:800,color:C.white,marginBottom:4 }}>Join as a Carrier</div>
+              <div style={{ fontSize:18,fontWeight:800,color:C.white,marginBottom:4 }}>Join as a Transporter</div>
               <div style={{ fontSize:13,color:"rgba(255,255,255,0.55)" }}>Fill in your details, upload your documents and get approved in under 24 hours.</div>
             </div>
             <button onClick={()=>setRegistering(true)} style={{ background:C.green,color:C.black,border:"none",borderRadius:8,padding:"12px 20px",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:font,whiteSpace:"nowrap",flexShrink:0 }}>

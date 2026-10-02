@@ -101,25 +101,25 @@ export function toShipperShipmentView(load, bookings = []) {
   const plate = booking?.plate || load.plate;
   return {
     ...load,
-    driver: booking?.carrier || load.driver || "Matching carrier…",
+    driver: booking?.carrier || load.driver || "Matching transporter…",
     plate: plate || "—",
     truck: booking?.truckType || load.truck || "Any Available",
     progress: load.progress ?? STATUS_PROGRESS_FALLBACK[load.status] ?? 0,
     route: load.route || `${load.from} → ${load.to}`,
     // Priority matters here, not just presence: a SEED_LOADS record's static
     // `ping` reflects its *authored* status (e.g. "Nakuru Bypass" while In
-    // Transit, or "Awaiting carrier" while Escrow Held) and goes stale the
+    // Transit, or "Awaiting transporter" while Escrow Held) and goes stale the
     // moment reality changes — either the load reaches a done state, or a
     // LIVE booking gets created for it (found a second instance of this same
     // bug during Phase 3C testing: booking KE-2046 still showed the seed's
-    // stale "Awaiting carrier" instead of "Carrier dispatched" because
+    // stale "Awaiting transporter" instead of "Transporter dispatched" because
     // `load.ping` was checked before the live booking). Live signals
     // (isDone, then an actual booking) must always outrank the static value.
     ping: isDone
       ? "Delivered ✓"
       : booking
-      ? `Carrier dispatched · ${plate}`
-      : (load.ping || "Awaiting carrier"),
+      ? `Transporter dispatched · ${plate}`
+      : (load.ping || "Awaiting transporter"),
     eta: load.eta || load.delD || "TBD",
   };
 }

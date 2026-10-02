@@ -391,7 +391,7 @@ function RiskCenter({ carrierRiskProfiles, shipperRiskProfiles, carrierRoster })
       <div style={{ display:"flex", gap:6, marginBottom:14 }}>
         {["carriers","shippers"].map(t => (
           <button key={t} onClick={()=>setTab(t)} style={{ flex:1, background:tab===t?C.black:C.white, color:tab===t?C.white:C.secondary, border:`1.5px solid ${tab===t?C.black:C.border}`, borderRadius:8, padding:"10px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:font }}>
-            {t === "carriers" ? `🚛 Carriers (${carrierRiskProfiles.length})` : `📦 Shippers (${shipperRiskProfiles.length})`}
+            {t === "carriers" ? `🚛 Transporters (${carrierRiskProfiles.length})` : `📦 Shippers (${shipperRiskProfiles.length})`}
           </button>
         ))}
       </div>
@@ -573,7 +573,7 @@ function EscrowReleasePanel({ load, escrow, onRelease, onClose }) {
 
           {/* Total to carrier */}
           <div style={{ display:"flex",justifyContent:"space-between",padding:"14px 16px",background:C.greenBg }}>
-            <span style={{ fontSize:14,fontWeight:800,color:C.black }}>Released to Carrier</span>
+            <span style={{ fontSize:14,fontWeight:800,color:C.black }}>Released to Transporter</span>
             <span style={{ fontSize:16,fontWeight:800,color:C.green }}>KSh {toCarrier.toLocaleString()}</span>
           </div>
         </div>
@@ -703,7 +703,7 @@ function Treasury({ escrowData, frozenPayouts, frozenPayoutsReason, onFreezePayo
                   </div>
                   <div style={{ textAlign:"right", flexShrink:0 }}>
                     <div style={{ fontSize:14, fontWeight:800, color:C.black }}>KSh {(e.baseAmount||0).toLocaleString()}</div>
-                    {e.breakdown && <div style={{ fontSize:11, color:C.green, fontWeight:600 }}>→ KSh {e.breakdown.toCarrier.toLocaleString()} to carrier</div>}
+                    {e.breakdown && <div style={{ fontSize:11, color:C.green, fontWeight:600 }}>→ KSh {e.breakdown.toCarrier.toLocaleString()} to transporter</div>}
                   </div>
                 </div>
               </div>
@@ -753,7 +753,7 @@ function Treasury({ escrowData, frozenPayouts, frozenPayoutsReason, onFreezePayo
       {/* Emergency freeze */}
       <SectionHead label="Emergency Operations" color={C.red} />
       <div style={{ ...card, padding:"14px 16px" }}>
-        <div style={{ fontSize:13, fontWeight:700, color:C.black, marginBottom:4 }}>Freeze All Carrier Payouts</div>
+        <div style={{ fontSize:13, fontWeight:700, color:C.black, marginBottom:4 }}>Freeze All Transporter Payouts</div>
         <div style={{ fontSize:12, color:C.muted, marginBottom:12 }}>Suspends all pending B2C M-Pesa disbursements network-wide. Requires reason.</div>
         {frozenPayouts
           ? <div style={{ background:C.redBg, color:C.red, borderRadius:6, padding:"10px 12px", fontSize:12, fontWeight:700 }}>🔴 Payouts currently frozen — use Unfreeze above</div>
@@ -802,11 +802,11 @@ function DispatchCenter({ allLoads, carrierRoster, adminOps }) {
 
   return (
     <>
-      <SectionHead label="Unassigned / Needs Carrier" color={C.blue} />
+      <SectionHead label="Unassigned / Needs Transporter" color={C.blue} />
       {unassigned.length === 0 ? (
         <div style={{ ...card, padding:36, textAlign:"center", marginBottom:14 }}>
           <div style={{ fontSize:32, marginBottom:8 }}>✅</div>
-          <div style={{ fontSize:14, fontWeight:700, color:C.secondary }}>All active loads have assigned carriers</div>
+          <div style={{ fontSize:14, fontWeight:700, color:C.secondary }}>All active loads have assigned transporters</div>
         </div>
       ) : (
         <div style={{ ...card, overflow:"hidden", marginBottom:14 }}>
@@ -822,7 +822,7 @@ function DispatchCenter({ allLoads, carrierRoster, adminOps }) {
               </div>
               <div style={{ textAlign:"right", flexShrink:0, marginLeft:8 }}>
                 <div style={{ fontSize:13, fontWeight:800, color:C.black }}>KSh {(l.pay||0).toLocaleString()}</div>
-                <div style={{ fontSize:10, color:C.blue, fontWeight:600 }}>Find carrier →</div>
+                <div style={{ fontSize:10, color:C.blue, fontWeight:600 }}>Find transporter →</div>
               </div>
             </div>
           ))}
@@ -832,8 +832,8 @@ function DispatchCenter({ allLoads, carrierRoster, adminOps }) {
       {/* Carrier recommendations */}
       {selectedLoad && (
         <>
-          <SectionHead label={`AI Carrier Matches — ${selectedLoad.id}`} color={C.blue} />
-          {loadingRecs && <div style={{ textAlign:"center", padding:24, color:C.muted, fontSize:13 }}>Scoring carriers…</div>}
+          <SectionHead label={`AI Transporter Matches — ${selectedLoad.id}`} color={C.blue} />
+          {loadingRecs && <div style={{ textAlign:"center", padding:24, color:C.muted, fontSize:13 }}>Scoring transporters…</div>}
           {!loadingRecs && recs.slice(0,5).map((c,i) => (
             <div key={c.id} style={{ ...card, marginBottom:8, padding:"14px 16px" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
@@ -862,7 +862,7 @@ function DispatchCenter({ allLoads, carrierRoster, adminOps }) {
                 ))}
               </div>
               {i === 0 && c.available && (
-                <button onClick={()=>{ adminOps.logAudit("DISPATCH_ASSIGN", selectedLoad.id, `Carrier ${c.name} (${c.id}) recommended via smart dispatch`); setSelectedLoad(null); setRecs([]); }} style={{ width:"100%", marginTop:10, background:C.black, color:C.white, border:"none", borderRadius:7, padding:"10px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:font }}>
+                <button onClick={()=>{ adminOps.logAudit("DISPATCH_ASSIGN", selectedLoad.id, `Transporter ${c.name} (${c.id}) recommended via smart dispatch`); setSelectedLoad(null); setRecs([]); }} style={{ width:"100%", marginTop:10, background:C.black, color:C.white, border:"none", borderRadius:7, padding:"10px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:font }}>
                   ✓ Assign {c.name}
                 </button>
               )}
@@ -873,7 +873,7 @@ function DispatchCenter({ allLoads, carrierRoster, adminOps }) {
 
       {/* All available carriers — with smart-assign filter */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-        <SectionHead label="Carrier Roster" />
+        <SectionHead label="Transporter Roster" />
         <div style={{ display:"flex", gap:4 }}>
           {["All","Available","Flatbed","Refrigerated","Tanker"].map(f=>(
             <button key={f} onClick={()=>setRosterFilter(f)} style={{ background:rosterFilter===f?C.black:C.bg, color:rosterFilter===f?C.white:C.secondary, border:`1px solid ${rosterFilter===f?C.black:C.border}`, borderRadius:100, padding:"3px 8px", fontSize:9, fontWeight:700, cursor:"pointer", fontFamily:font }}>{f}</button>
@@ -1471,7 +1471,7 @@ function InterventionPanel({ load, onForceStatus, onCancel, onClose, onLogAudit=
           ))}
         </div>
         <label style={{display:"block",fontSize:11,fontWeight:700,color:C.secondary,letterSpacing:0.8,textTransform:"uppercase",marginBottom:5}}>Reason (optional)</label>
-        <input value={reason} onChange={e=>setReason(e.target.value)} placeholder="e.g. Carrier reported breakdown, manual correction…" style={{width:"100%",padding:"11px 12px",fontSize:13,fontFamily:font,background:C.bg,border:`1.5px solid ${C.border}`,borderRadius:8,outline:"none",marginBottom:16}}/>
+        <input value={reason} onChange={e=>setReason(e.target.value)} placeholder="e.g. Transporter reported breakdown, manual correction…" style={{width:"100%",padding:"11px 12px",fontSize:13,fontFamily:font,background:C.bg,border:`1.5px solid ${C.border}`,borderRadius:8,outline:"none",marginBottom:16}}/>
         <div style={{display:"flex",gap:8}}>
           <button onClick={onClose} style={{flex:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font,color:C.black}}>Cancel</button>
           <button onClick={async()=>{setBusy(true);await onCancel(load.id,"Admin cancelled");await onLogAudit("LOAD_CANCELLED",load.id,"Admin cancelled load","Admin");setBusy(false);onClose();}} disabled={busy} style={{flex:1,background:C.redBg,color:C.red,border:`1px solid ${C.red}44`,borderRadius:8,padding:"12px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font}}>Cancel Load</button>
@@ -1483,7 +1483,7 @@ function InterventionPanel({ load, onForceStatus, onCancel, onClose, onLogAudit=
 
 /* ── Feature 29: BROADCAST ALERT MODAL ──────────────────────────────────── */
 function BroadcastModal({ onClose, onLogAudit = ()=>{} }) {
-  const [audience, setAudience] = useState("All Carriers");
+  const [audience, setAudience] = useState("All Transporters");
   const [channel,  setChannel]  = useState("push");   // push | email | sms
   const [subject,  setSubject]  = useState("");
   const [body,     setBody]     = useState("");
@@ -1500,7 +1500,7 @@ function BroadcastModal({ onClose, onLogAudit = ()=>{} }) {
     setTimeout(onClose, 2000);
   }
 
-  const AUDIENCES = ["All Carriers","All Shippers","All Users","Nairobi Region","Mombasa Region","In-Transit Drivers"];
+  const AUDIENCES = ["All Transporters","All Shippers","All Users","Nairobi Region","Mombasa Region","In-Transit Drivers"];
   const CHANNELS  = [
     { id:"push",  label:"📲 Push",  sub:"In-app notification" },
     { id:"email", label:"📧 Email", sub:"Via Mailchimp" },
@@ -1553,7 +1553,7 @@ function BroadcastModal({ onClose, onLogAudit = ()=>{} }) {
 
             {/* Body */}
             <div style={{ fontSize:11,fontWeight:700,color:C.secondary,letterSpacing:0.8,textTransform:"uppercase",marginBottom:5 }}>Message</div>
-            <textarea value={body} onChange={e=>setBody(e.target.value)} rows={4} placeholder={channel==="sms"?"Keep it short — SMS is 160 chars":"Write your message to carriers/shippers…"} maxLength={channel==="sms"?160:undefined} style={{ width:"100%",background:C.bg,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"10px 13px",fontSize:13,fontFamily:font,outline:"none",resize:"vertical",marginBottom:8 }} />
+            <textarea value={body} onChange={e=>setBody(e.target.value)} rows={4} placeholder={channel==="sms"?"Keep it short — SMS is 160 chars":"Write your message to transporters/shippers…"} maxLength={channel==="sms"?160:undefined} style={{ width:"100%",background:C.bg,border:`1.5px solid ${C.border}`,borderRadius:8,padding:"10px 13px",fontSize:13,fontFamily:font,outline:"none",resize:"vertical",marginBottom:8 }} />
             {channel==="sms" && <div style={{ fontSize:11,color:C.muted,marginBottom:12,textAlign:"right" }}>{body.length}/160</div>}
 
             <button onClick={handleSend} disabled={!body.trim()||sending} style={{ width:"100%",background:body.trim()&&!sending?C.black:"#C8C8C8",color:C.white,border:"none",borderRadius:8,padding:"13px",fontSize:14,fontWeight:700,cursor:body.trim()&&!sending?"pointer":"not-allowed",fontFamily:font }}>

@@ -24,7 +24,7 @@ export const CARRIER_RISK_FACTORS = {
 
 export const SHIPPER_RISK_FACTORS = {
   ESCROW_ABUSE:       { weight:30, label:"Escrow abuse pattern",   icon:"🔒", desc:"Repeated escrow holds without valid cause" },
-  CANCELLATION_TREND: { weight:25, label:"Cancellation frequency", icon:"🚫", desc:"High cancellation rate after carrier booking" },
+  CANCELLATION_TREND: { weight:25, label:"Cancellation frequency", icon:"🚫", desc:"High cancellation rate after transporter booking" },
   DISPUTE_INITIATION: { weight:25, label:"Dispute initiation",     icon:"⚖",  desc:"Disputes opened disproportionately" },
   PAYMENT_ANOMALY:    { weight:20, label:"Payment anomalies",      icon:"💸", desc:"Unusual payment timing or amounts" },
 };

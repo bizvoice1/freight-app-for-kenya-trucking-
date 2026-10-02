@@ -327,12 +327,12 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
               </div>
               <div>
                 <div style={{ fontSize:14,fontWeight:700,color:C.black }}>Open to bids (Auction mode)</div>
-                <div style={{ fontSize:11,color:C.muted,marginTop:1 }}>Carriers compete — you pick the best offer</div>
+                <div style={{ fontSize:11,color:C.muted,marginTop:1 }}>Transporters compete — you pick the best offer</div>
               </div>
             </label>
             {form.auctionMode && (
               <div style={{ marginTop:10,background:C.amberBg,borderRadius:8,padding:"8px 12px",fontSize:12,color:C.amber,fontWeight:600 }}>
-                🏷 Your budget of KSh {budgetNum>0?budgetNum.toLocaleString():"—"} is the ceiling. Carriers bid below it. Lowest bid wins.
+                🏷 Your budget of KSh {budgetNum>0?budgetNum.toLocaleString():"—"} is the ceiling. Transporters bid below it. Lowest bid wins.
               </div>
             )}
           </div>
@@ -501,7 +501,7 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
                 <div style={{ background:C.bg,borderRadius:10,padding:"24px 16px",textAlign:"center",marginBottom:16 }}>
                   <div style={{ fontSize:28,marginBottom:8 }}>👀</div>
                   <div style={{ fontSize:13,fontWeight:700,color:C.secondary }}>No declared trucks match yet</div>
-                  <div style={{ fontSize:12,color:C.muted,marginTop:2 }}>Your cargo stays open — carriers can still find and book it.</div>
+                  <div style={{ fontSize:12,color:C.muted,marginTop:2 }}>Your cargo stays open — transporters can still find and book it.</div>
                 </div>
               )}
               {!loadingMatches && matchesFound.map(m => (
@@ -866,7 +866,7 @@ function EscrowReleasePanel({ s, escrow, onRelease, onClose }) {
 
           {/* Total to carrier */}
           <div style={{ display:"flex",justifyContent:"space-between",padding:"14px 16px",background:C.greenBg }}>
-            <span style={{ fontSize:14,fontWeight:800,color:C.black }}>Released to Carrier</span>
+            <span style={{ fontSize:14,fontWeight:800,color:C.black }}>Released to Transporter</span>
             <span style={{ fontSize:16,fontWeight:800,color:C.green }}>KSh {toCarrier.toLocaleString()}</span>
           </div>
         </div>
@@ -908,10 +908,10 @@ function DetailModal({ s, onClose, onConfirmDelivery = ()=>{}, escrowData = {}, 
   const isDelivered       = status === "Delivered" || status === "Paid Out";
   const isReadyForRelease = status === "Delivery Confirmed";
   const isArrived         = status === "Arrived";
-  const canConfirmDelivery = isArrived || (status === "In Transit" && s.driver !== "Matching carrier…");
+  const canConfirmDelivery = isArrived || (status === "In Transit" && s.driver !== "Matching transporter…");
   const isDisputed        = status === "Disputed";
   const canDispute        = (status === "In Transit" || status === "Arrived" || status === "Loading") && !isDisputed;
-  const awaitingCarrier   = !s.driver || s.driver === "Matching carrier…";
+  const awaitingCarrier   = !s.driver || s.driver === "Matching transporter…";
 
   async function findNearbyTrucks() {
     setLoadingNearby(true);
@@ -998,9 +998,9 @@ function DetailModal({ s, onClose, onConfirmDelivery = ()=>{}, escrowData = {}, 
 
         {/* Carrier profile + chat secondary actions */}
         <div style={{ display:"flex",gap:8,marginBottom:16 }}>
-          {s.driver && s.driver !== "Matching carrier…" && (
+          {s.driver && s.driver !== "Matching transporter…" && (
             <button onClick={()=>setShowCarrierProfile(true)} style={{ flex:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 8px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,color:C.secondary }}>
-              👤 View Carrier
+              👤 View Transporter
             </button>
           )}
           <button onClick={()=>setShowChat(true)} style={{ flex:1,background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 8px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font,color:C.secondary }}>
@@ -1014,7 +1014,7 @@ function DetailModal({ s, onClose, onConfirmDelivery = ()=>{}, escrowData = {}, 
             <div style={{ fontSize:13,fontWeight:800,color:C.amber,marginBottom:2 }}>🏷 Auction Mode — Open for Bids</div>
             <div style={{ fontSize:11,color:C.amber,opacity:0.75,marginBottom:10 }}>Budget ceiling: KSh {s.pay.toLocaleString()} · Lowest bid wins</div>
             {bids.length === 0 && (
-              <div style={{ fontSize:12,color:C.muted,padding:"12px 0",textAlign:"center" }}>No bids yet — waiting for carriers to bid</div>
+              <div style={{ fontSize:12,color:C.muted,padding:"12px 0",textAlign:"center" }}>No bids yet — waiting for transporters to bid</div>
             )}
             {bids.map((bid,i)=>(
               <div key={i} style={{ background:C.white,borderRadius:8,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center",border:`1px solid ${i===0?C.green:C.border}` }}>
@@ -1038,7 +1038,7 @@ function DetailModal({ s, onClose, onConfirmDelivery = ()=>{}, escrowData = {}, 
         {!s.auctionMode && bids.length > 0 && (
           <div style={{ background:C.amberBg,border:`1px solid ${C.amber}`,borderRadius:12,padding:"12px 14px",marginBottom:16 }}>
             <div style={{ fontSize:11,fontWeight:700,color:C.amber,letterSpacing:0.8,textTransform:"uppercase",marginBottom:10 }}>
-              💸 Carrier Counter-offers ({bids.length})
+              💸 Transporter Counter-offers ({bids.length})
             </div>
             {bids.map((bid,i) => (
               <div key={i} style={{ background:C.white,borderRadius:8,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
@@ -1069,10 +1069,10 @@ function DetailModal({ s, onClose, onConfirmDelivery = ()=>{}, escrowData = {}, 
         )}
 
         {/* Paid out — rate prompt */}
-        {isDelivered && !hasRated && s.driver && s.driver !== "Matching carrier…" && (
+        {isDelivered && !hasRated && s.driver && s.driver !== "Matching transporter…" && (
           <div style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
             <div>
-              <div style={{ fontSize:12,fontWeight:700,color:C.black,marginBottom:2 }}>⭐ Rate your carrier</div>
+              <div style={{ fontSize:12,fontWeight:700,color:C.black,marginBottom:2 }}>⭐ Rate your transporter</div>
               <div style={{ fontSize:11,color:C.muted }}>{s.driver} · {s.id}</div>
             </div>
             <button onClick={()=>setShowRate(true)} style={{ background:C.black,color:C.white,border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:font }}>Rate Now</button>
@@ -1196,7 +1196,7 @@ function InvoiceModal({ s, onClose }) {
         <tbody>
           <tr><td>Freight charge</td><td>KSh ${s.pay.toLocaleString()}</td></tr>
           <tr><td>Platform fee (2%)</td><td style="color:#dc2626">− KSh ${adminFee.toLocaleString()}</td></tr>
-          <tr><td>Net paid to carrier</td><td style="color:#16a34a">KSh ${net.toLocaleString()}</td></tr>
+          <tr><td>Net paid to transporter</td><td style="color:#16a34a">KSh ${net.toLocaleString()}</td></tr>
           <tr class="total"><td>Total Charged</td><td>KSh ${s.pay.toLocaleString()}</td></tr>
         </tbody>
       </table>
@@ -1291,7 +1291,7 @@ function InvoiceModal({ s, onClose }) {
             {[
               { label:"Freight charge",        value:`KSh ${s.pay.toLocaleString()}`,     color:C.black, bold:false },
               { label:"Platform fee (2%)",      value:`− KSh ${adminFee.toLocaleString()}`, color:C.red,   bold:false },
-              { label:"Net paid to carrier",    value:`KSh ${net.toLocaleString()}`,        color:C.green, bold:true  },
+              { label:"Net paid to transporter",    value:`KSh ${net.toLocaleString()}`,        color:C.green, bold:true  },
             ].map(({ label, value, color, bold }) => (
               <div key={label} style={{ display:"flex",justifyContent:"space-between",padding:"12px 16px",borderBottom:`1px solid ${C.border}` }}>
                 <span style={{ fontSize:13,color:C.secondary }}>{label}</span>
@@ -1348,7 +1348,7 @@ function NotificationsPanel({ notifications, onClose, onMarkAllRead }) {
           <div style={{ textAlign:"center",padding:"48px 20px" }}>
             <div style={{ fontSize:36,marginBottom:10 }}>🔔</div>
             <div style={{ fontSize:15,fontWeight:700,color:C.secondary,marginBottom:4 }}>No notifications yet</div>
-            <div style={{ fontSize:13,color:C.muted }}>You'll be notified when a carrier accepts your load</div>
+            <div style={{ fontSize:13,color:C.muted }}>You'll be notified when a transporter accepts your load</div>
           </div>
         )}
 
@@ -1357,7 +1357,7 @@ function NotificationsPanel({ notifications, onClose, onMarkAllRead }) {
           <div key={n.id} style={{ display:"flex",gap:12,alignItems:"flex-start",padding:"14px 16px",borderBottom:i<a.length-1?`1px solid ${C.border}`:"none",background:n.read?C.white:"#F0FBF6" }}>
             <div style={{ width:38,height:38,borderRadius:"50%",background:C.greenBg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0 }}>🚛</div>
             <div style={{ flex:1,minWidth:0 }}>
-              <div style={{ fontSize:13,fontWeight:700,color:C.black,marginBottom:3 }}>Carrier Accepted Your Load</div>
+              <div style={{ fontSize:13,fontWeight:700,color:C.black,marginBottom:3 }}>Transporter Accepted Your Load</div>
               <div style={{ fontSize:12,color:C.secondary,lineHeight:1.55 }}>
                 <strong>{n.carrier}</strong> assigned <strong>{n.plate}</strong> ({n.truckType}) to <strong>{n.loadId}</strong> — {n.cargo}
               </div>
@@ -1595,14 +1595,14 @@ function ChatModal({ loadId, title, currentUser, onClose }) {
 
 /* ── CARRIER PUBLIC PROFILE (SHIPPER VIEW) ───────────────── */
 function CarrierProfileModal({ carrier, onClose }) {
-  const name  = carrier && carrier !== "Matching carrier…" ? carrier : "James K. Mwangi";
+  const name  = carrier && carrier !== "Matching transporter…" ? carrier : "James K. Mwangi";
   const KYC   = ["National ID","Licence CE","GIT Insurance","NTSA Inspection","Truck Logbook","KRA PIN"];
   return (
     <div style={{ position:"fixed",inset:0,zIndex:600,display:"flex",alignItems:"flex-end",justifyContent:"center",fontFamily:font }}>
       <div onClick={onClose} style={{ position:"absolute",inset:0,background:"rgba(0,0,0,0.55)",backdropFilter:"blur(4px)" }} />
       <div style={{ position:"relative",background:C.white,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:480,maxHeight:"88vh",overflowY:"auto",padding:"8px 20px 40px" }} onClick={e=>e.stopPropagation()}>
         <div style={{ width:36,height:4,background:C.border,borderRadius:2,margin:"12px auto 20px" }} />
-        <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",marginBottom:12 }}>Carrier Profile</div>
+        <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",marginBottom:12 }}>Transporter Profile</div>
 
         <div style={{ background:C.black,borderRadius:14,padding:"20px 18px",marginBottom:20,display:"flex",gap:16,alignItems:"center" }}>
           <div style={{ width:60,height:60,borderRadius:"50%",background:C.green,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:800,color:C.black,flexShrink:0 }}>
@@ -1785,7 +1785,7 @@ function MultiTruckPanel({ slots = [], truckCount = 1 }) {
           <div style={{ display:"flex",alignItems:"center",gap:8 }}>
             <div style={{ width:28,height:28,borderRadius:6,background:C.bg,border:`1px dashed ${C.border}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:C.muted }}>?</div>
             <div>
-              <div style={{ fontSize:12,fontWeight:700,color:C.muted }}>Slot {slots.length + i + 1} — Awaiting carrier</div>
+              <div style={{ fontSize:12,fontWeight:700,color:C.muted }}>Slot {slots.length + i + 1} — Awaiting transporter</div>
               <div style={{ fontSize:11,color:C.muted }}>Matching in progress…</div>
             </div>
           </div>
@@ -1814,7 +1814,7 @@ function ShipperRatingModal({ shipment, onClose, onSubmitRating }) {
     await onSubmitRating({
       loadId:   shipment.id,
       raterRole:"shipper",
-      rateeId:  shipment.driver || "Carrier",
+      rateeId:  shipment.driver || "Transporter",
       scores,
       comment,
     });
@@ -1827,7 +1827,7 @@ function ShipperRatingModal({ shipment, onClose, onSubmitRating }) {
       <div style={{ position:"relative",background:C.white,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:480,padding:"32px 20px 48px",textAlign:"center" }}>
         <div style={{ fontSize:56,marginBottom:12 }}>⭐</div>
         <div style={{ fontSize:22,fontWeight:800,color:C.black,marginBottom:6 }}>Rating Submitted!</div>
-        <div style={{ fontSize:14,color:C.secondary,marginBottom:24 }}>Carrier will see your feedback. It helps build trust on the platform.</div>
+        <div style={{ fontSize:14,color:C.secondary,marginBottom:24 }}>Transporter will see your feedback. It helps build trust on the platform.</div>
         <button onClick={onClose} style={{ width:"100%",background:C.black,color:C.white,border:"none",borderRadius:10,padding:14,fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:font }}>Done</button>
       </div>
     </div>
@@ -1839,8 +1839,8 @@ function ShipperRatingModal({ shipment, onClose, onSubmitRating }) {
       <div style={{ position:"relative",background:C.white,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:480,maxHeight:"90vh",overflowY:"auto",padding:"8px 20px 40px" }} onClick={e=>e.stopPropagation()}>
         <div style={{ width:36,height:4,background:C.border,borderRadius:2,margin:"12px auto 20px" }} />
 
-        <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",marginBottom:4 }}>Rate This Carrier</div>
-        <div style={{ fontSize:20,fontWeight:800,color:C.black,marginBottom:2 }}>{shipment.driver || "Carrier"}</div>
+        <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",marginBottom:4 }}>Rate This Transporter</div>
+        <div style={{ fontSize:20,fontWeight:800,color:C.black,marginBottom:2 }}>{shipment.driver || "Transporter"}</div>
         <div style={{ fontSize:13,color:C.secondary,marginBottom:20 }}>{shipment.cargo} · {shipment.id}</div>
 
         {CARRIER_RATING_DIMS.map(d => (
@@ -2096,7 +2096,7 @@ export default function BehariShipper({ onPostLoad = ()=>{}, postedLoads = [], n
   useEffect(() => {
     if (notifications.length > prevNotifCount.current) {
       const latest = notifications[notifications.length - 1];
-      if (latest) setToast(`📱 SMS Alert: Carrier ${latest.carrier} booked ${latest.loadId}`);
+      if (latest) setToast(`📱 SMS Alert: Transporter ${latest.carrier} booked ${latest.loadId}`);
     }
     prevNotifCount.current = notifications.length;
   }, [notifications.length]);

@@ -447,7 +447,7 @@ function PendingScreen({ form, onClose }) {
 
         <div style={{ fontSize:26,fontWeight:800,color:C.black,letterSpacing:-0.5,marginBottom:8 }}>Application Submitted!</div>
         <div style={{ fontSize:15,color:C.secondary,lineHeight:1.6,maxWidth:340,marginBottom:28 }}>
-          Thank you, <strong>{form.name || "Carrier"}</strong>. Your application is now under review by our KYC team.
+          Thank you, <strong>{form.name || "Transporter"}</strong>. Your application is now under review by our KYC team.
         </div>
 
         {/* Reference card */}
@@ -625,7 +625,7 @@ export default function Onboarding({ onClose }) {
         <div style={{ display:"flex",alignItems:"center",gap:12,height:52 }}>
           <button onClick={onClose} style={{ background:"none",border:"none",cursor:"pointer",color:C.secondary,fontSize:20,lineHeight:1,padding:"4px 2px" }}>←</button>
           <div style={{ flex:1 }}>
-            <div style={{ fontSize:13,fontWeight:700,color:C.black }}>Carrier Registration</div>
+            <div style={{ fontSize:13,fontWeight:700,color:C.black }}>Transporter Registration</div>
             <div style={{ fontSize:11,color:C.muted }}>Step {step+1} of {STEPS.length} · {STEPS[step]}</div>
           </div>
           <div style={{ fontSize:12,fontWeight:700,color:C.black }}>{step+1}/{STEPS.length}</div>
