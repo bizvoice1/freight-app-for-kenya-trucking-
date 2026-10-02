@@ -22,6 +22,9 @@ export function computeLedger({ booking, payments, escrow, adjustments = [] }) {
   const approvedAdjustments = adjustments
     .filter(a => OBLIGATING_ADJUSTMENT_STATUSES.has(a.status))
     .reduce((sum, a) => sum + a.amount, 0);
+  const proposedAdjustments = adjustments
+    .filter(a => a.status === "PROPOSED")
+    .reduce((sum, a) => sum + a.amount, 0);
   const totalObligation = agreedAmount === null ? null : agreedAmount + approvedAdjustments;
   const confirmedFunding = payments.filter(p => p.status === "Paid").reduce((sum, p) => sum + p.amount, 0);
   const blockingAdjustments = adjustments.filter(a => BLOCKING_ADJUSTMENT_STATUSES.has(a.status)).length;
@@ -29,6 +32,7 @@ export function computeLedger({ booking, payments, escrow, adjustments = [] }) {
   return {
     agreedAmount,
     approvedAdjustments,
+    proposedAdjustments, // requested, unapproved: NOT part of the obligation
     totalObligation,
     confirmedFunding,
     outstanding: totalObligation === null ? null : totalObligation - confirmedFunding,

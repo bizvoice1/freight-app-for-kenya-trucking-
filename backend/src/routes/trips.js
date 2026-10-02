@@ -44,6 +44,8 @@ import { logPaymentEvent, flagReconciliation, loadLedgerSync } from "../services
 import { NOTIFICATION_TYPE } from "../domain/notification.js";
 import { notifyUser, notifyUsers, allAdminUserIds } from "../services/notifications.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { maybeMakeEscrowEligibleForRelease } from "../services/release.js";
+import { expireProposedAdjustmentsSync } from "../services/adjustments.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -196,41 +198,6 @@ async function releaseFleetAssignment(truckId) {
   await db.update(drivers).set({ assignedTruckId: null, status: DRIVER_STATUS.AVAILABLE }).where(eq(drivers.id, driverId));
 }
 
-/**
- * Phase 4K-D (docs/4K-DARAJA-SPEC.md Section 5) — the moment a trip reaches
- * Delivered, check whether its escrow may move to RELEASE_PENDING. This is
- * ONLY a status flip + audit log if eligible; it never touches Daraja. No
- * booking (a trip without one) or no escrow (payment never completed) are
- * both legitimate "not eligible" outcomes, not errors.
- */
-async function maybeMakeEscrowEligibleForRelease(trip, requestId) {
-  if (!trip.bookingId) return;
-  const [booking] = await db.select().from(bookings).where(eq(bookings.id, trip.bookingId));
-  if (!booking) return;
-  const [escrow] = await db.select().from(escrows).where(eq(escrows.bookingId, booking.id));
-  const ledger = loadLedgerSync(db, booking.id);
-
-  const decision = evaluateReleaseEligibility({ trip, booking, escrow: escrow || null, ledger });
-  if (!decision.eligible) {
-    if (decision.mismatch) {
-      await flagReconciliation("escrow_ledger_mismatch", "escrow", escrow.id, { tripId: trip.id, bookingId: booking.id, ledger });
-    }
-    return;
-  }
-
-  const now = new Date().toISOString();
-  await db.update(escrows).set({ status: ESCROW_STATUS.RELEASE_PENDING, releasePendingAt: now, updatedAt: now }).where(eq(escrows.id, escrow.id));
-  await logPaymentEvent("escrow", escrow.id, "status_changed", ESCROW_STATUS.HELD, ESCROW_STATUS.RELEASE_PENDING, { tripId: trip.id }, requestId);
-
-  await notifyUser(booking.transporterId, NOTIFICATION_TYPE.RELEASE_PENDING,
-    "Delivery confirmed — payout pending", `Escrow ${escrow.id} for booking ${booking.id} is ready for release.`,
-    "escrow", escrow.id);
-  const adminIds = await allAdminUserIds();
-  await notifyUsers(adminIds, NOTIFICATION_TYPE.RELEASE_PENDING,
-    "Escrow ready for release", `Escrow ${escrow.id} (booking ${booking.id}) is awaiting admin release.`,
-    "escrow", escrow.id);
-}
-
 /** Phase 4L — notifies the load's shipper and the booking's transporter of every trip status change. */
 async function notifyTripStatusChanged(trip, nextStatus) {
   const [load] = trip.loadId ? await db.select().from(loads).where(eq(loads.id, trip.loadId)) : [null];
@@ -270,7 +237,16 @@ router.post("/:tripId/status", asyncHandler(async (req, res) => {
   if (nextStatus === TRIP_STATUS.DISPATCHED && !trip.startedAt) updates.startedAt = now;
   if (TERMINAL_TRIP_STATUSES.has(nextStatus)) updates.completedAt = now;
 
-  await db.update(trips).set(updates).where(eq(trips.id, trip.id));
+  if (nextStatus === TRIP_STATUS.DELIVERED && trip.bookingId) {
+    // 5D-2: the trip write and the expiry of unapproved adjustments are one transaction, so
+    // "shipper approves" vs "Delivered" is deterministic: whichever commits first wins.
+    db.transaction((tx) => {
+      tx.update(trips).set(updates).where(eq(trips.id, trip.id)).run();
+      expireProposedAdjustmentsSync(tx, trip.bookingId, req.id);
+    });
+  } else {
+    await db.update(trips).set(updates).where(eq(trips.id, trip.id));
+  }
   if (TERMINAL_TRIP_STATUSES.has(nextStatus)) await releaseFleetAssignment(trip.truckId);
   if (nextStatus === TRIP_STATUS.DELIVERED) await maybeMakeEscrowEligibleForRelease({ ...trip, ...updates }, req.id);
   await notifyTripStatusChanged(trip, nextStatus);

@@ -8,7 +8,7 @@
  */
 
 import { db } from "../db/client.js";
-import { paymentEvents, reconciliationFlags, payments, escrows, bookings } from "../db/schema.js";
+import { paymentEvents, reconciliationFlags, payments, escrows, bookings, adjustments } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { computeLedger } from "../domain/ledger.js";
 
@@ -83,5 +83,6 @@ export function loadLedgerSync(dbOrTx, bookingId) {
   if (!booking) return null;
   const rows = dbOrTx.select().from(payments).where(eq(payments.bookingId, bookingId)).all();
   const escrow = dbOrTx.select().from(escrows).where(eq(escrows.bookingId, bookingId)).get() || null;
-  return computeLedger({ booking, payments: rows, escrow });
+  const adjRows = dbOrTx.select().from(adjustments).where(eq(adjustments.bookingId, bookingId)).all();
+  return computeLedger({ booking, payments: rows, escrow, adjustments: adjRows });
 }

@@ -57,6 +57,20 @@
       "when": 1790965900483,
       "tag": "0007_5d1_backfill_and_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790967777251,
+      "tag": "0008_5d2_adjustments",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1790967795008,
+      "tag": "0009_5d2_triggers",
+      "breakpoints": true
     }
   ]
 }

@@ -226,7 +226,8 @@ export const payments = sqliteTable("payments", {
   mpesaReceiptNumber: text("mpesa_receipt_number"),
   resultCode:         integer("result_code"),
   resultDesc:         text("result_desc"),
-  purpose:            text("purpose").notNull().default("INITIAL"), // Phase 5D-1 — "INITIAL" now; "ADJUSTMENT" arrives in 5D-3
+  purpose:            text("purpose").notNull().default("INITIAL"), // "INITIAL" | "ADJUSTMENT"
+  adjustmentId:       text("adjustment_id"), // 5D-2 — required iff purpose = "ADJUSTMENT" (trigger-enforced)
   createdAt:          text("created_at").notNull(),
   updatedAt:          text("updated_at").notNull(),
 }, (table) => ({
@@ -240,6 +241,13 @@ export const payments = sqliteTable("payments", {
   oneInflightPerBooking: uniqueIndex("payments_one_inflight_per_booking")
     .on(table.bookingId)
     .where(sql`${table.status} in ('Pending', 'StkSent')`),
+  // Phase 5D-2 — a booking's agreed price is confirmed-paid at most once, and each adjustment at most once.
+  onePaidInitialPerBooking: uniqueIndex("payments_one_paid_initial_per_booking")
+    .on(table.bookingId)
+    .where(sql`${table.purpose} = 'INITIAL' and ${table.status} = 'Paid'`),
+  onePaidPerAdjustment: uniqueIndex("payments_one_paid_per_adjustment")
+    .on(table.adjustmentId)
+    .where(sql`${table.status} = 'Paid'`),
 }));
 
 export const escrows = sqliteTable("escrows", {
@@ -378,4 +386,49 @@ export const offers = sqliteTable("offers", {
   loadIdIdx:        index("offers_load_id_idx").on(table.loadId),
   transporterIdIdx: index("offers_transporter_id_idx").on(table.transporterId),
   statusExpiryIdx:  index("offers_status_expires_idx").on(table.status, table.expiresAt),
+}));
+
+/**
+ * Phase 5D-2 — commercial adjustments (docs/5D-PRICING-SPEC.md 3.3, 4.2, 5.3,
+ * 5.7). An adjustment is a frozen commercial fact layered ON TOP of the
+ * booking's immutable agreedAmount; it never rewrites loads.price or
+ * bookings.agreedAmount. Money columns (amount, agreedAmountSnapshot,
+ * capSnapshotPct) and reason are immutable after insert (migration 0009
+ * triggers); only status and lifecycle timestamps move. capSnapshotPct is a
+ * percentage (25 = 25%).
+ */
+export const adjustments = sqliteTable("adjustments", {
+  id:                   text("id").primaryKey(),
+  bookingId:            text("booking_id").notNull(),
+  requestedById:        text("requested_by_id").notNull(), // users.id (the booking's transporter)
+  amount:               real("amount").notNull(),          // positive KSh increase
+  agreedAmountSnapshot: real("agreed_amount_snapshot").notNull(),
+  capSnapshotPct:       real("cap_snapshot_pct").notNull(), // PERCENT: 25 = 25%, not 0.25
+  reasonCode:           text("reason_code").notNull(),     // EXTRA_DISTANCE (reserved for 5J) | WAITING_TIME | ROUTE_CHANGE | ADDITIONAL_CARGO | TOLLS_FEES | OTHER
+  reason:               text("reason").notNull(),
+  status:               text("status").notNull(),          // PROPOSED|APPROVED|FUNDING|FUNDED|REJECTED|WITHDRAWN|EXPIRED
+  closeReason:          text("close_reason"),
+  source:               text("source").notNull().default("MANUAL"), // MANUAL | RULE (5J)
+  sourceRef:            text("source_ref"),
+  approvalExpiresAt:    text("approval_expires_at").notNull(),
+  fundingDueAt:         text("funding_due_at"),
+  approvedById:         text("approved_by_id"),
+  approvedAt:           text("approved_at"),
+  rejectedById:         text("rejected_by_id"),
+  rejectedAt:           text("rejected_at"),
+  rejectReason:         text("reject_reason"),
+  withdrawnAt:          text("withdrawn_at"),
+  expiredAt:            text("expired_at"),
+  paidAt:               text("paid_at"),
+  createdAt:            text("created_at").notNull(),
+  updatedAt:            text("updated_at").notNull(),
+}, (table) => ({
+  amountPositive: check("adjustments_amount_positive", sql`${table.amount} > 0`),
+  oneOpenPerBooking: uniqueIndex("adjustments_one_open_per_booking")
+    .on(table.bookingId)
+    .where(sql`${table.status} in ('PROPOSED', 'APPROVED', 'FUNDING', 'DISPUTED')`),
+  sourceRefUnique: uniqueIndex("adjustments_booking_source_ref_unique")
+    .on(table.bookingId, table.sourceRef)
+    .where(sql`${table.sourceRef} is not null`),
+  bookingIdIdx: index("adjustments_booking_id_idx").on(table.bookingId),
 }));

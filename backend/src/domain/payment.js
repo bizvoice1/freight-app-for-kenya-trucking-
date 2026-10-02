@@ -27,15 +27,16 @@ export const NON_TERMINAL_PAYMENT_STATUSES = new Set([
 ]);
 
 export const PAYMENT_PURPOSE = {
-  INITIAL: "INITIAL", // the agreed price (5D-1); "ADJUSTMENT" arrives with 5D-3
+  INITIAL:    "INITIAL",    // the agreed price (5D-1)
+  ADJUSTMENT: "ADJUSTMENT", // an approved commercial adjustment (5D-2); requires adjustmentId
 };
 
 export function generatePaymentId(existingCount) {
   return `PAY-${1000 + existingCount}`;
 }
 
-/** @param {{bookingId:string, shipperId:string, amount:number, phoneNumber:string}} data */
-export function createPayment({ bookingId, shipperId, amount, phoneNumber }, existingCount) {
+/** @param {{bookingId:string, shipperId:string, amount:number, phoneNumber:string, purpose?:string, adjustmentId?:string|null}} data */
+export function createPayment({ bookingId, shipperId, amount, phoneNumber, purpose, adjustmentId }, existingCount) {
   const now = new Date().toISOString();
   return {
     id:                 generatePaymentId(existingCount),
@@ -44,7 +45,8 @@ export function createPayment({ bookingId, shipperId, amount, phoneNumber }, exi
     amount,
     phoneNumber,
     status:             PAYMENT_STATUS.PENDING,
-    purpose:            PAYMENT_PURPOSE.INITIAL,
+    purpose:            purpose ?? PAYMENT_PURPOSE.INITIAL,
+    adjustmentId:       adjustmentId ?? null,
     merchantRequestId:  null,
     checkoutRequestId:  null, // set once Daraja's synchronous response arrives
     mpesaReceiptNumber: null, // set exactly once, on first successful callback — never overwritten

@@ -22,6 +22,9 @@ export const NOTIFICATION_TYPE = {
   OFFER_COUNTERED:   "offer_countered",    // -> the previous proposer
   OFFER_ACCEPTED:    "offer_accepted",     // -> the accepted offer's proposer
   OFFER_REJECTED:    "offer_rejected",     // -> the rejected/closed offer's proposer
+  ADJUSTMENT_PROPOSED: "adjustment_proposed", // -> the shipper (a transporter requested an increase)
+  ADJUSTMENT_DECIDED:  "adjustment_decided",  // -> the transporter (approved or rejected)
+  ADJUSTMENT_FUNDED:   "adjustment_funded",   // -> the transporter
 };
 
 export function generateNotificationId(existingCount) {

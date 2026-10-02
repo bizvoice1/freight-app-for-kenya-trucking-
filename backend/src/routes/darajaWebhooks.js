@@ -28,6 +28,8 @@ import { logPaymentEvent, flagReconciliation } from "../services/ledger.js";
 import { NOTIFICATION_TYPE } from "../domain/notification.js";
 import { notifyUser, notifyUsers, allAdminUserIds } from "../services/notifications.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { settleAdjustmentPaymentSync, failAdjustmentPaymentSync } from "../services/adjustments.js";
+import { reevaluateReleaseForBooking } from "../services/release.js";
 
 const router = Router();
 const ACK = { ResultCode: 0, ResultDesc: "Accepted" };
@@ -74,6 +76,33 @@ router.post("/payments/callback/stk", asyncHandler(async (req, res) => {
     const [dupe] = await db.select().from(payments).where(and(eq(payments.mpesaReceiptNumber, receipt), ne(payments.id, payment.id)));
     if (dupe) {
       await flagReconciliation("duplicate_receipt_number", "payment", payment.id, req.body);
+      return res.status(200).json(ACK);
+    }
+
+    // 5D-2: an ADJUSTMENT payment tops up the booking's existing escrow; it never creates a second one.
+    if (payment.purpose === "ADJUSTMENT") {
+      let outcome;
+      try {
+        outcome = db.transaction((tx) => settleAdjustmentPaymentSync(tx, payment, { receipt, resultCode: cb.ResultCode, resultDesc: cb.ResultDesc }, req.id));
+      } catch (err) {
+        if (isUniqueConstraintError(err)) {
+          await flagReconciliation("duplicate_receipt_number", "payment", payment.id, req.body);
+          return res.status(200).json(ACK);
+        }
+        throw err;
+      }
+      await logPaymentEvent("payment", payment.id, "callback_received", PAYMENT_STATUS.STK_SENT, PAYMENT_STATUS.PAID, req.body, req.id);
+      if (!outcome.raised) await flagReconciliation("adjustment_paid_escrow_not_held", "payment", payment.id, req.body);
+      await notifyUser(payment.shipperId, NOTIFICATION_TYPE.ADJUSTMENT_FUNDED,
+        "Adjustment payment confirmed", `Your adjustment payment of ${payment.amount} for booking ${payment.bookingId} was received.`,
+        "payment", payment.id);
+      const [adjBooking] = await db.select().from(bookings).where(eq(bookings.id, payment.bookingId));
+      if (adjBooking) {
+        await notifyUser(adjBooking.transporterId, NOTIFICATION_TYPE.ADJUSTMENT_FUNDED,
+          "Adjustment funded", `The +${payment.amount} adjustment on booking ${adjBooking.id} is now held in escrow.`,
+          "payment", payment.id);
+      }
+      await reevaluateReleaseForBooking(payment.bookingId, req.id);
       return res.status(200).json(ACK);
     }
 
@@ -124,8 +153,12 @@ router.post("/payments/callback/stk", asyncHandler(async (req, res) => {
     }
   } else {
     const failStatus = cb.ResultCode === 1032 ? PAYMENT_STATUS.CANCELLED : PAYMENT_STATUS.FAILED;
-    await db.update(payments).set({ status: failStatus, resultCode: cb.ResultCode, resultDesc: cb.ResultDesc, updatedAt: now })
-      .where(eq(payments.id, payment.id));
+    if (payment.purpose === "ADJUSTMENT") {
+      db.transaction((tx) => failAdjustmentPaymentSync(tx, payment, failStatus, { resultCode: cb.ResultCode, resultDesc: cb.ResultDesc }, req.id));
+    } else {
+      await db.update(payments).set({ status: failStatus, resultCode: cb.ResultCode, resultDesc: cb.ResultDesc, updatedAt: now })
+        .where(eq(payments.id, payment.id));
+    }
     await logPaymentEvent("payment", payment.id, "callback_received", PAYMENT_STATUS.STK_SENT, failStatus, req.body, req.id);
 
     await notifyUser(payment.shipperId, NOTIFICATION_TYPE.PAYMENT_FAILED,

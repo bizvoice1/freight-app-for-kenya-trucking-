@@ -14,6 +14,7 @@ import payoutRoutes from "./routes/payouts.js";
 import darajaWebhookRoutes from "./routes/darajaWebhooks.js";
 import notificationRoutes from "./routes/notifications.js";
 import geoRoutes from "./routes/geo.js";
+import adjustmentRoutes from "./routes/adjustments.js";
 
 export const app = express();
 
@@ -80,6 +81,7 @@ app.use("/api/trips", tripRoutes);
 app.use("/api/loads", loadRoutes);
 app.use("/api/offers", offerRoutes);
 app.use("/api/bookings", bookingRoutes);
+app.use("/api/adjustments", adjustmentRoutes);
 app.use("/api", fleetRoutes); // GET /api/trucks, GET /api/drivers
 app.use("/api/payments", paymentRoutes);
 app.use("/api/escrows", escrowRoutes);

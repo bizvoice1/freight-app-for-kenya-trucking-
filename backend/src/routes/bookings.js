@@ -22,6 +22,7 @@ import { logPaymentEvent } from "../services/ledger.js";
 import { stkPush, callbackUrl } from "../services/daraja.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ROAD_DISTANCE_REQUIRED } from "../services/loadRoute.js";
+import { AdjustmentError, requestAdjustment, listAdjustmentsFor, getBookingLedgerFor } from "../services/adjustments.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -255,6 +256,30 @@ router.post("/:bookingId/payment", requireRole("shipper"), asyncHandler(async (r
 
   const [updated] = await db.select().from(payments).where(eq(payments.id, payment.id));
   res.status(201).json(updated);
+}));
+
+/** Phase 5D-2 — adjustments & ledger, booking-scoped. Authorization lives in services/adjustments.js. */
+function adjustmentRoute(fn) {
+  return asyncHandler(async (req, res) => {
+    try {
+      await fn(req, res);
+    } catch (err) {
+      if (err instanceof AdjustmentError) return res.status(err.status).json({ error: err.message, code: err.code });
+      throw err;
+    }
+  });
+}
+
+router.post("/:bookingId/adjustments", adjustmentRoute(async (req, res) => {
+  res.status(201).json(await requestAdjustment(req.user, req.params.bookingId, req.body, req.id));
+}));
+
+router.get("/:bookingId/adjustments", adjustmentRoute(async (req, res) => {
+  res.json(await listAdjustmentsFor(req.user, req.params.bookingId));
+}));
+
+router.get("/:bookingId/ledger", adjustmentRoute(async (req, res) => {
+  res.json(await getBookingLedgerFor(req.user, req.params.bookingId));
 }));
 
 export default router;
