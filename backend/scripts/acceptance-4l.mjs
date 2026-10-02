@@ -3,6 +3,7 @@
 // -> recipient mapping agreed for 4L's narrow scope, plus the read/unread
 // endpoints and the "a notification belongs to exactly its recipient" rule.
 import Database from "better-sqlite3";
+import { NBO_NKU } from "./fixtures.mjs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -67,7 +68,7 @@ async function setup() {
 
 async function createBookedTrip(price) {
   repairPeterToKbd(peterTruckId, peterDriverId);
-  const load = (await api(shipper.token, "POST", "/api/loads", { cargo: "4L test cargo", origin: "Nairobi", destination: "Nakuru", price })).json;
+  const load = (await api(shipper.token, "POST", "/api/loads", { cargo: "4L test cargo", origin: "Nairobi", destination: "Nakuru", price, ...NBO_NKU })).json;
   const booking = (await api(james.token, "POST", `/api/loads/${load.id}/accept`, {})).json;
   const assign = await api(james.token, "POST", `/api/bookings/${booking.id}/assign`, { truckId: peterTruckId, driverId: peterDriverId });
   assert(assign.status === 200, `assign failed: ${JSON.stringify(assign.json)}`);

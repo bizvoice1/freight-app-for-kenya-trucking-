@@ -10,7 +10,6 @@ import { getAllKnownLoads, toShipperShipmentView } from "./src/services/loadView
 import { sortNewestFirst, makePlace, resolveDistance, distLabel, decodePolyline } from "./src/models/geo.js";
 import PlaceInput from "./src/components/maps/PlaceInput.jsx";
 import GoogleMap from "./src/components/maps/GoogleMap.jsx";
-import { fetchRoadRoute } from "./src/services/routeApi.js";
 import { hasMapsKey } from "./src/services/googleMaps.js";
 // Step 8: Rating dimensions
 import { CARRIER_RATING_DIMS } from "./src/models/rating.js";
@@ -81,7 +80,7 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
   const [loadingMatches,setLoadingMatches]= useState(false);
   const [form, setForm] = useState({
     pickup:"", destination:"", cargoType:"", description:"",
-    pickupPlace:null, deliveryPlace:null, routeKm:null, routePolyline:null, routeDurationMin:null, // 5C-2
+    pickupPlace:null, deliveryPlace:null, 
     weight:"", unit:"Tonnes", truckType:"", truckCount:"1", pickupDate:"", deadline:"", penalty:"", budget:"", phone:"+254 7",
     recurring:false, recurFreq:"weekly",
     auctionMode:false, // Feature 10
@@ -90,27 +89,9 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
 
   const set = (k, v) => setForm(f => ({...f, [k]:v}));
 
-  // 5C-2 — once both places are pinned from autocomplete, ask the backend for the
-  // real road distance. Any failure leaves routeKm null → corridor, else distance stays unresolved.
-  const [routeBusy, setRouteBusy] = useState(false);
   const [placesUsable, setPlacesUsable] = useState(hasMapsKey());
-  useEffect(() => {
-    const a = form.pickupPlace, b = form.deliveryPlace;
-    setForm(f => (f.routeKm == null && !f.routePolyline) ? f : ({...f, routeKm:null, routePolyline:null, routeDurationMin:null}));
-    if (!a || !b) { setRouteBusy(false); return; }
-    let alive = true;
-    setRouteBusy(true);
-    fetchRoadRoute(a, b).then(r => {
-      if (!alive) return;
-      setRouteBusy(false);
-      if (r) setForm(f => ({...f, routeKm:r.routeKm, routePolyline:r.polyline, routeDurationMin:r.durationMin}));
-    });
-    return () => { alive = false; };
-  }, [form.pickupPlace?.placeId, form.deliveryPlace?.placeId]);
 
   const _pp = makePlace(form.pickup, form.pickupPlace), _dp = makePlace(form.destination, form.deliveryPlace);
-  const _dist = resolveDistance({ pickup:_pp, delivery:_dp, routeKm:Number(form.routeKm) });
-  const _distInfo = distLabel({ dist:_dist.km, distSource:_dist.source });
 
   const inp = { width:"100%", background:C.bg, border:`1px solid ${C.border}`, borderRadius:8, padding:"12px 14px", fontSize:14, fontFamily:font, color:C.black, outline:"none", marginBottom:12, fontWeight:500, boxSizing:"border-box" };
   const lbl = { display:"block", fontSize:11, fontWeight:700, color:C.secondary, letterSpacing:0.8, textTransform:"uppercase", marginBottom:5 };
@@ -214,11 +195,9 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
           <label style={lbl}>Destination</label>
           <PlaceInput style={inp} theme={{bg:C.white,border:C.border,text:C.black,muted:C.muted,ok:C.green}} placeholder="e.g. Kampala, Nakawa Industrial Area" value={form.destination} pinned={!!form.deliveryPlace} onUsableChange={setPlacesUsable}
             onChange={(t,pl)=>setForm(f=>({...f, destination:t, deliveryPlace:pl}))} />
-          {(routeBusy || _dist.km > 0 || (_pp.name && _dp.name)) && (
-            <div style={{ fontSize:12, fontWeight:600, color:_dist.km > 0 || routeBusy ? C.secondary : C.amber || "#B45309", marginTop:-6, marginBottom:12 }}>
-              {routeBusy ? "Calculating road distance…" : (_dist.km > 0
-                ? `Distance: ${_distInfo.text}`
-                : ((form.pickupPlace && form.deliveryPlace) ? "Road distance couldn't be calculated right now — it will show as unavailable" : "Pick both places from the suggestions to continue"))}
+          {(_pp.name && _dp.name) && (
+            <div style={{ fontSize:12, fontWeight:600, color:C.secondary, marginTop:-6, marginBottom:12 }}>
+              Road distance is calculated by the server once the load is posted.
             </div>
           )}
 

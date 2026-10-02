@@ -52,6 +52,7 @@ import {
   ESCROW_STATUS,
   calculateEscrowRelease,
 } from "../models/load.js";
+import { metersToKm, ratePerKmFromMeters } from "../models/geo.js";
 import { createRatingRecord, aggregateRatings } from "../models/rating.js";
 
 /* ── Helpers ────────────────────────────────────────────────────────────── */
@@ -217,6 +218,25 @@ export function createLoad(formData) {
   _initEscrow(newLoad.id);
   _addMilestone(newLoad.id, "🔒", `Escrow locked — KSh ${newLoad.pay.toLocaleString()} held`);
   return Promise.resolve(newLoad);
+}
+
+/** Copies the backend's stored road route (and canonical id) onto the local load. Estimates are never promoted: source must be ROAD. */
+export function linkBackendLoad(loadId, view) {
+  const l = _store.postedLoads.find(x => x.id === loadId);
+  if (!l || !view?.id) return Promise.resolve(l || null);
+  const road = view.distanceSource === "ROAD" && view.distanceMeters > 0;
+  const next = { ...l, backendLoadId: view.id };
+  if (road) {
+    next.distanceMeters = view.distanceMeters;
+    next.routePolyline  = view.routePolyline || null;
+    next.dist           = metersToKm(view.distanceMeters);
+    next.distSource     = "route";
+    next.rateKm         = ratePerKmFromMeters(l.pay, view.distanceMeters);
+    next.etaMin         = view.routeDurationMin || l.etaMin;
+  }
+  _store.postedLoads = _store.postedLoads.map(x => x.id === loadId ? next : x);
+  _persist();
+  return Promise.resolve(next);
 }
 
 export function assignCarrier({ loadId, cargo, carrier, plate, truckType }) {

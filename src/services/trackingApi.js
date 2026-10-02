@@ -101,3 +101,8 @@ export async function postJson(path, body, role = "shipper") {
   let json = null; try { json = await res.json(); } catch {}
   return { status: res.status, json };
 }
+
+/** Authenticated GET returning parsed JSON or null (404/403/failure). Used for the stored load view. */
+export async function getJson(path, role = "fleet_owner") {
+  try { return await _get(path, role); } catch { return null; }
+}

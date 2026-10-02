@@ -3,6 +3,7 @@
 // can claim their paths before fleetRoutes' blanket requireAuth). Verifies
 // every pre-4K endpoint family still behaves identically.
 import Database from "better-sqlite3";
+import { NBO_NKU } from "./fixtures.mjs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -100,7 +101,7 @@ async function main() {
   });
 
   await test("Phase 4H/4J: full load -> booking -> assign -> create-trip -> driver operates -> shipper confirms Delivered", async () => {
-    const load = (await api(demoShipper.token, "POST", "/api/loads", { cargo: "Regression pipeline", origin: "Nairobi", destination: "Eldoret" })).json;
+    const load = (await api(demoShipper.token, "POST", "/api/loads", { cargo: "Regression pipeline", origin: "Nairobi", destination: "Eldoret", ...NBO_NKU })).json;
     const booking = (await api(james.token, "POST", `/api/loads/${load.id}/accept`, {})).json;
 
     const trucks = (await api(james.token, "GET", "/api/trucks")).json;

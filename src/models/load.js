@@ -272,10 +272,10 @@ export function createLoadFromForm(formData, existingCount) {
   const delivery = makePlace(toStr,   formData.deliveryPlace);
   const corridor = lookupCorridor(fromStr, toStr);
   const { km: distKm, source: distSource } = resolveDistance({
-    pickup, delivery, routeKm: Number(formData.routeKm), corridorKm: corridor?.distKm,
+    pickup, delivery, distanceMeters: Number(formData.distanceMeters), corridorKm: corridor?.distKm,
   });
   const etaHrs   = corridor ? corridor.etaHrs : 0;
-  const routeEtaMin = Number(formData.routeDurationMin) > 0 ? Number(formData.routeDurationMin) : 0;
+  const routeEtaMin = 0;
   const budget   = Math.max(0, Number(formData.budget) || 0);
   const rateKm   = ratePerKm(budget, distKm);
 
@@ -301,7 +301,9 @@ export function createLoadFromForm(formData, existingCount) {
     distSource,                   // "route" | "corridor" | "unresolved"
     rateKm,                       // KSh/km = pay ÷ dist
     etaMin:         etaHrs ? etaHrs * 60 : routeEtaMin, // minutes — corridor first, else provider duration
-    routePolyline:  formData.routePolyline || null, // encoded road route (5C-2), for maps
+    distanceMeters: null,         // set only by the backend's stored Routes result (5C-3)
+    routePolyline:  null,         // server polyline, exact only for the owning shipper
+    backendLoadId:  null,         // canonical backend load (BHL-…) once linked
 
     // Equipment
     truck:          formData.truckType  || "Any Available",

@@ -26,8 +26,8 @@ export function generateBookingId(existingCount) {
   return `BHB-${1000 + existingCount}`;
 }
 
-/** @param {{loadId:string, transporterId:string}} data */
-export function createBooking({ loadId, transporterId }, existingCount) {
+/** @param {{loadId:string, transporterId:string, agreedRoadDistanceMeters:number}} data */
+export function createBooking({ loadId, transporterId, agreedRoadDistanceMeters }, existingCount) {
   const now = new Date().toISOString();
   return {
     id:            generateBookingId(existingCount),
@@ -36,6 +36,7 @@ export function createBooking({ loadId, transporterId }, existingCount) {
     truckId:       null,
     driverId:      null,
     tripId:        null,
+    agreedRoadDistanceMeters, // 5C-3 immutable snapshot of loads.distance_meters
     status:        BOOKING_STATUS.ACCEPTED,
     createdAt:     now,
     updatedAt:     now,

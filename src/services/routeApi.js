@@ -1,25 +1,23 @@
 /**
  * src/services/routeApi.js
  * -------------------------
- * Phase 5C-2 — asks the Behari backend for the road route between two places.
- * Returns { routeKm, durationMin, polyline } or null on ANY failure (backend
- * down, key not configured, no route, rate limited) so the caller falls back to
- * the known-corridor distance already in models/geo.js.
+ * 5C-3 — the backend owns the one canonical Routes computation per load.
+ * The client only posts the load (exact places) and reads back the stored view.
  */
-import { postJson } from "./trackingApi.js";
+import { postJson, getJson } from "./trackingApi.js";
 
-const ok = (p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lng);
-
-export async function fetchRoadRoute(pickup, delivery) {
-  if (!ok(pickup) || !ok(delivery)) return null;
+/** Posts a load to the backend; returns the shipper's exact view or null on any failure. */
+export async function createBackendLoad(load) {
   try {
-    const { status, json } = await postJson("/api/geo/route", {
-      origin:      { lat: pickup.lat,   lng: pickup.lng },
-      destination: { lat: delivery.lat, lng: delivery.lng },
-    });
-    if (status !== 200 || !json || !Number.isFinite(json.distanceKm)) return null;
-    return { routeKm: json.distanceKm, durationMin: json.durationMin, polyline: json.polyline || null };
-  } catch {
-    return null;
-  }
+    const { status, json } = await postJson("/api/loads", {
+      cargo: load.cargo, origin: load.from, destination: load.to,
+      weight: load.weight, truckType: load.truck, price: load.pay, pickupDate: load.pickD,
+      pickup: load.pickup, delivery: load.delivery,
+    }, "shipper");
+    return status === 201 ? json : null;
+  } catch { return null; }
 }
+
+/** Fetches a load through the API's privacy boundary as the given role. */
+export const fetchBackendLoad = (id, role = "fleet_owner") =>
+  getJson(`/api/loads/${encodeURIComponent(id)}`, role);

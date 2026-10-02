@@ -3,6 +3,7 @@
 // failure cases from docs/4K-DARAJA-SPEC.md Section 9, plus the concurrency
 // test, against the REAL running server (not imported functions).
 import Database from "better-sqlite3";
+import { NBO_NKU } from "./fixtures.mjs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -92,7 +93,7 @@ function repairPeterToKbd() {
 async function createBookedTrip(price, shipperCtx = shipper) {
   repairPeterToKbd();
   const load = (await api(shipperCtx.token, "POST", "/api/loads", {
-    cargo: "Test cargo", origin: "Nairobi", destination: "Nakuru", price,
+    cargo: "Test cargo", origin: "Nairobi", destination: "Nakuru", price, ...NBO_NKU,
   })).json;
 
   const accept = await api(james.token, "POST", `/api/loads/${load.id}/accept`, {});

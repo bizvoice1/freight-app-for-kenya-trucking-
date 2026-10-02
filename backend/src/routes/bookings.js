@@ -21,6 +21,7 @@ import { createPayment, NON_TERMINAL_PAYMENT_STATUSES } from "../domain/payment.
 import { logPaymentEvent } from "../services/ledger.js";
 import { stkPush, callbackUrl } from "../services/daraja.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { ROAD_DISTANCE_REQUIRED } from "../services/loadRoute.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -207,6 +208,9 @@ router.post("/:bookingId/payment", requireRole("shipper"), asyncHandler(async (r
   if (!load) return res.status(404).json({ error: `No load found with id ${booking.loadId}.` });
   if (load.shipperId !== req.user.id) {
     return res.status(403).json({ error: "This booking is not for a load belonging to the authenticated shipper." });
+  }
+  if (!(booking.agreedRoadDistanceMeters > 0)) {
+    return res.status(ROAD_DISTANCE_REQUIRED.status).json(ROAD_DISTANCE_REQUIRED.body);
   }
   if (typeof load.price !== "number") {
     return res.status(400).json({ error: `Load ${load.id} has no price set — cannot initiate payment.` });

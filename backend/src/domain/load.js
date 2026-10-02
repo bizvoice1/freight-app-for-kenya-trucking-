@@ -77,6 +77,7 @@ export function createLoad(data, existingCount) {
     deliveryPlaceId: data.deliveryPlace?.placeId ?? null,
     deliveryLat:     data.deliveryPlace?.lat ?? null,
     deliveryLng:     data.deliveryPlace?.lng ?? null,
+    distanceMeters: null, routePolyline: null, routeDurationSec: null, distanceSource: null, // 5C-3: filled once by services/loadRoute.js
     status:      LOAD_STATUS.OPEN,
     createdAt:   now,
     updatedAt:   now,

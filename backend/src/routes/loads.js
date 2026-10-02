@@ -14,6 +14,8 @@ import { createLoad, parsePlace, LOAD_STATUS } from "../domain/load.js";
 import { createBooking } from "../domain/booking.js";
 import { NOTIFICATION_TYPE } from "../domain/notification.js";
 import { notifyUsers, allTransporterUserIds } from "../services/notifications.js";
+import { ensureLoadRoute, requireRoadDistance, ROAD_DISTANCE_REQUIRED } from "../services/loadRoute.js";
+import { viewLoadFor, viewLoadsFor } from "../services/loadView.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
 const router = Router();
@@ -33,6 +35,9 @@ router.post("/", requireRole("shipper"), asyncHandler(async (req, res) => {
   const count = (await db.select().from(loads)).length;
   const load = createLoad({ shipperId: req.user.id, cargo, origin, destination, weight, truckType, price, pickupDate, pickupPlace: pickupParsed.place, deliveryPlace: deliveryParsed.place }, count);
   await db.insert(loads).values(load);
+  // 5C-3 — the one canonical route computation; a failure leaves the load
+  // postable and browsable, just without a road distance (it cannot be booked).
+  const routed = await ensureLoadRoute(load);
 
   // Phase 4L — marketplace-wide, not targeted: there's no backend matching
   // engine yet to decide which transporter this load is actually relevant
@@ -45,7 +50,7 @@ router.post("/", requireRole("shipper"), asyncHandler(async (req, res) => {
     "load", load.id
   );
 
-  res.status(201).json(load);
+  res.status(201).json(await viewLoadFor(req.user, routed));
 }));
 
 /**
@@ -77,7 +82,7 @@ router.get("/", asyncHandler(async (req, res) => {
   const rows = conditions.length
     ? await db.select().from(loads).where(and(...conditions)).orderBy(desc(loads.createdAt), desc(loads.id))
     : await db.select().from(loads).orderBy(desc(loads.createdAt), desc(loads.id));
-  res.json(rows);
+  res.json(await viewLoadsFor(req.user, rows));
 }));
 
 /**
@@ -93,7 +98,7 @@ router.get("/:loadId", asyncHandler(async (req, res) => {
   if (req.user.role === "shipper" && load.shipperId !== req.user.id) {
     return res.status(403).json({ error: "This load does not belong to the authenticated shipper." });
   }
-  res.json(load);
+  res.json(await viewLoadFor(req.user, load));
 }));
 
 /**
@@ -115,8 +120,12 @@ router.post("/:loadId/accept", requireRole("fleet_owner"), asyncHandler(async (r
     return res.status(409).json({ error: `Load ${load.id} is not open (status: ${load.status}).` });
   }
 
+  // 5C-3 — commercial gate: only a stored Google Routes distance satisfies it.
+  const routed = await requireRoadDistance(load);
+  if (!routed) return res.status(ROAD_DISTANCE_REQUIRED.status).json(ROAD_DISTANCE_REQUIRED.body);
+
   const count = (await db.select().from(bookings)).length;
-  const booking = createBooking({ loadId: load.id, transporterId: req.user.id }, count);
+  const booking = createBooking({ loadId: load.id, transporterId: req.user.id, agreedRoadDistanceMeters: routed.distanceMeters }, count);
   try {
     await db.insert(bookings).values(booking);
   } catch (err) {

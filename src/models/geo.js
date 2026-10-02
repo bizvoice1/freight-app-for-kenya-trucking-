@@ -58,14 +58,22 @@ export function makePlace(name = "", explicit = null) {
  * @param {number}  [p.corridorKm]         known-corridor road distance, if any
  * @returns {{ km:number, source:string }}
  */
-export function resolveDistance({ pickup, delivery, routeKm, corridorKm }) {
-  if (Number.isFinite(routeKm) && routeKm > 0) {
-    return { km: Math.round(routeKm), source: DIST_SOURCE.ROUTE };
+export function resolveDistance({ pickup, delivery, distanceMeters, corridorKm }) {
+  if (Number.isFinite(distanceMeters) && distanceMeters > 0) {
+    return { km: metersToKm(distanceMeters), source: DIST_SOURCE.ROUTE };
   }
   if (Number.isFinite(corridorKm) && corridorKm > 0) {
     return { km: Math.round(corridorKm), source: DIST_SOURCE.CORRIDOR };
   }
   return { km: 0, source: DIST_SOURCE.UNRESOLVED };
+}
+
+/** Display rounding of a stored road distance: meters -> km to 0.1. */
+export function metersToKm(m) { return Math.round(m / 100) / 10; }
+
+/** KSh per km from price and stored road METERS (not the rounded display km). */
+export function ratePerKmFromMeters(pay, meters) {
+  return meters > 0 && pay > 0 ? Math.round(pay / (meters / 1000)) : 0;
 }
 
 /** KSh per km from the offered price and the resolved distance (0 if either is missing). */
@@ -120,13 +128,17 @@ export function decodePolyline(str = "") {
   return pts;
 }
 
-/** User-facing label for how a load's distance was obtained. */
+/**
+ * User-facing label. "by road" is reserved for a stored server Routes result;
+ * a corridor figure is a browsing estimate and is always labelled as such.
+ */
 export function distLabel(load) {
   const km = load?.dist || 0;
-  // "haversine" = legacy straight-line value stored by an earlier build; never shown as a distance.
-  if (!km || load.distSource === "haversine") return { text: "Distance n/a", approx: true, source: DIST_SOURCE.UNRESOLVED };
-  switch (load.distSource) {
-    case DIST_SOURCE.ROUTE:     return { text: `${km} km by road`,        approx: false, source: DIST_SOURCE.ROUTE };
-    default:                    return { text: `${km} km`,                approx: false, source: load.distSource || DIST_SOURCE.CORRIDOR };
+  if (!km || load.distSource === "haversine" || load.distSource === DIST_SOURCE.UNRESOLVED) {
+    return { text: "Distance n/a", approx: true, source: DIST_SOURCE.UNRESOLVED };
   }
+  if (load.distSource === DIST_SOURCE.ROUTE) {
+    return { text: `${km} km by road`, approx: false, source: DIST_SOURCE.ROUTE };
+  }
+  return { text: `≈ ${Math.round(km)} km (estimated)`, approx: true, source: DIST_SOURCE.CORRIDOR };
 }

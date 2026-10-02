@@ -9,6 +9,7 @@
 // copies of the same assertion silently drifting apart.
 import jwt from "jsonwebtoken";
 import Database from "better-sqlite3";
+import { NBO_NKU } from "./fixtures.mjs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -87,7 +88,7 @@ function repairPeterToKbd() {
 
 async function postOpenLoad(price = 1000) {
   repairPeterToKbd();
-  return (await api(shipper.token, "POST", "/api/loads", { cargo: "Attack test cargo", origin: "Nairobi", destination: "Nakuru", price })).json;
+  return (await api(shipper.token, "POST", "/api/loads", { cargo: "Attack test cargo", origin: "Nairobi", destination: "Nakuru", price, ...NBO_NKU })).json;
 }
 
 async function cancelTrip(tripId) {

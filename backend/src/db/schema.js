@@ -137,6 +137,8 @@ export const bookings = sqliteTable("bookings", {
   truckId:       text("truck_id"),  // null until assigned
   driverId:      text("driver_id"), // null until assigned
   tripId:        text("trip_id"),   // null until the trip is created
+  // Phase 5C-3 — immutable snapshot of loads.distance_meters at booking time.
+  agreedRoadDistanceMeters: integer("agreed_road_distance_meters"),
   status:        text("status").notNull(), // "Accepted" | "Assigned" | "Trip Created" | "Cancelled"
   createdAt:     text("created_at").notNull(),
   updatedAt:     text("updated_at").notNull(),
@@ -177,6 +179,14 @@ export const loads = sqliteTable("loads", {
   deliveryPlaceId:  text("delivery_place_id"),
   deliveryLat:      real("delivery_lat"),
   deliveryLng:      real("delivery_lng"),
+  // Phase 5C-3 — the ONE canonical Google Routes result for this load. Computed
+  // server-side from the exact coordinates, stored once, immutable afterwards
+  // (trigger in migration 0005). distance_meters is an integer; null until a
+  // real drivable-road route exists. An estimate is never stored here.
+  distanceMeters:   integer("distance_meters"),
+  routePolyline:    text("route_polyline"),
+  routeDurationSec: integer("route_duration_sec"),
+  distanceSource:   text("distance_source"), // "ROAD" or null
   status:      text("status").notNull(), // "Open" | "Booked" | "Cancelled"
   createdAt:   text("created_at").notNull(),
   updatedAt:   text("updated_at").notNull(),

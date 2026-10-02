@@ -31,8 +31,10 @@
  */
 
 import { useState, useCallback, useEffect } from "react";
+import { createBackendLoad } from "../services/routeApi.js";
 import {
   createLoad,
+  linkBackendLoad,
   assignCarrier,
   updateLoadStatus,
   getStoreSnapshot,
@@ -133,6 +135,13 @@ export function useLoads() {
     const newLoad = await createLoad(formData);
     setPostedLoads(prev => [newLoad, ...prev]);
     sync();
+    // 5C-3 — the backend computes and stores the one canonical road route.
+    // If it is unreachable the load stays browsable as "estimated" and cannot be booked.
+    createBackendLoad(newLoad).then(async (view) => {
+      if (!view) return;
+      await linkBackendLoad(newLoad.id, view);
+      sync();
+    });
     return newLoad;
   }, [sync]);
 

@@ -22,14 +22,14 @@ const KENYA = { lat: -0.5, lng: 37.5 };
 function pinEl(m) {
   const el = document.createElement("div");
   const c = m.color || "#E8541A";
-  el.style.cssText = `display:flex;align-items:center;gap:4px;transform:translateY(-4px);cursor:${m.onClick ? "pointer" : "default"}`;
+  el.style.cssText = `position:relative;width:22px;height:22px;transform:translateY(11px);cursor:${m.onClick ? "pointer" : "default"}`;
   const dot = document.createElement("div");
   dot.style.cssText = `width:16px;height:16px;border-radius:50%;background:${c};border:3px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.45);flex:none`;
   el.appendChild(dot);
   if (m.label) {
     const t = document.createElement("div");
     t.textContent = m.label;
-    t.style.cssText = "background:#fff;color:#111;font:700 11px system-ui,sans-serif;padding:2px 6px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.35);white-space:nowrap";
+    t.style.cssText = "position:absolute;left:28px;top:50%;transform:translateY(-50%);background:#fff;color:#111;font:700 11px system-ui,sans-serif;padding:2px 6px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.35);white-space:nowrap";
     el.appendChild(t);
   }
   return el;

@@ -9,7 +9,7 @@
 import { Router } from "express";
 import { requireAuth } from "../auth/middleware.js";
 import { parsePlace } from "../domain/load.js";
-import { computeRoadRoute, routesConfigured } from "../services/googleRoutes.js";
+import { computeRoadRoute, routesConfigured, metersToKm } from "../services/googleRoutes.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
 const router = Router();
@@ -48,7 +48,7 @@ router.post("/route", asyncHandler(async (req, res) => {
 
   try {
     const route = await computeRoadRoute(o.place, d.place);
-    res.json({ ...route, source: "route" });
+    res.json({ distanceMeters: route.distanceMeters, distanceKm: metersToKm(route.distanceMeters), durationMin: Math.round(route.durationSec / 60), polyline: route.polyline, source: "route" });
   } catch (e) {
     if (e.code === "NO_ROUTE") return res.status(422).json({ error: e.message, code: e.code });
     if (e.code === "ROUTES_UPSTREAM") return res.status(502).json({ error: e.message, code: e.code });

@@ -6,7 +6,8 @@ import { useState, useEffect, useRef } from "react";
 // filter-chip list (not load identity data) and stays imported directly.
 import { TRUCK_FILTERS } from "./src/data/loads.js";
 import { getAllKnownLoads, toCarrierMarketplaceView, toCarrierTripView } from "./src/services/loadViews.js";
-import { sortNewestFirst, distLabel, decodePolyline } from "./src/models/geo.js";
+import { sortNewestFirst, distLabel, decodePolyline, metersToKm } from "./src/models/geo.js";
+import { fetchBackendLoad } from "./src/services/routeApi.js";
 import GoogleMap from "./src/components/maps/GoogleMap.jsx";
 import { hasMapsKey } from "./src/services/googleMaps.js";
 import { CARRIER_FLEET_SEED as CARRIER_FLEET } from "./src/data/fleet.js";
@@ -161,13 +162,16 @@ function LeafletMap({ loadCount }) {
   );
 }
 
+/** Privacy: pre-booking pins are snapped to a ~2 km grid, never exact. */
+const snapPin = (v) => Math.round(v / 0.02) * 0.02;
+
 /* ── LOADS MAP (Google when a key is configured, else Leaflet) ───────── */
 function LoadsMap({ loads }) {
   const [gmFailed, setGmFailed] = useState(!hasMapsKey());
   if (gmFailed) return <LeafletMap loadCount={loads.length} />;
   const markers = loads
     .filter(l => Number.isFinite(l.pickup?.lat) && Number.isFinite(l.pickup?.lng))
-    .map(l => ({ id:l.id, lat:l.pickup.lat, lng:l.pickup.lng, label:`KSh ${Math.round(l.pay/1000)}k`, title:`${l.from} → ${l.to}`, color:l.urgent ? "#E11900" : "#06C167" }));
+    .map(l => ({ id:l.id, lat:snapPin(l.pickup.lat), lng:snapPin(l.pickup.lng), label:`KSh ${Math.round(l.pay/1000)}k`, title:`${l.from} → ${l.to}`, color:l.urgent ? "#E11900" : "#06C167" }));
   return (
     <div style={{ position:"relative", height:200 }}>
       <GoogleMap markers={markers} height={200} onUnavailable={() => setGmFailed(true)} />
@@ -175,7 +179,7 @@ function LoadsMap({ loads }) {
         {loads.length} loads
       </div>
       <div style={{ position:"absolute",left:8,bottom:8,background:"rgba(255,255,255,0.92)",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700,color:"#111",fontFamily:font,pointerEvents:"none" }}>
-        Pins mark pickup locations
+        Pins mark approximate pickup areas
       </div>
     </div>
   );
@@ -218,6 +222,57 @@ function calcETA(dist=0, from="", to="") {
   return `~${(hrs/24).toFixed(1)} days`;
 }
 
+/* ── CARGO DETAILS ROUTE MAP (5C-3) ─────────────────────────────────────
+ * Fed by GET /api/loads/:id as a transporter: the API itself decides what this
+ * caller may see. Before booking that is area labels, coarsened pins, a trimmed
+ * polyline and the exact server road distance. Nothing is filtered here. */
+function CargoRouteMap({ load }) {
+  const [view, setView] = useState(null);
+  const [state, setState] = useState(load.backendLoadId ? "loading" : "none");
+  const [gmFailed, setGmFailed] = useState(!hasMapsKey());
+  useEffect(() => {
+    if (!load.backendLoadId) return;
+    let alive = true;
+    fetchBackendLoad(load.backendLoadId, "fleet_owner").then(v => {
+      if (!alive) return;
+      setView(v); setState(v ? "ready" : "error");
+    });
+    return () => { alive = false; };
+  }, [load.backendLoadId]);
+
+  const box = { background:C.bg, borderRadius:8, padding:"10px 12px", marginBottom:12, fontSize:12, color:C.secondary };
+  if (state === "none")    return <div style={box}>Route map is not available for this demo listing.</div>;
+  if (state === "loading") return <div style={box}>Loading route…</div>;
+  if (state === "error" || !view) return <div style={box}>Route details could not be loaded right now.</div>;
+
+  const road = view.distanceSource === "ROAD" && view.distanceMeters > 0;
+  const path = road && view.routePolyline ? decodePolyline(view.routePolyline) : null;
+  const hasPins = Number.isFinite(view.pickupLat) && Number.isFinite(view.deliveryLat);
+  const markers = hasPins ? [
+    { id:"pickup",   lat:view.pickupLat,   lng:view.pickupLng,   label:view.pickupArea,   color:"#06C167" },
+    { id:"delivery", lat:view.deliveryLat, lng:view.deliveryLng, label:view.deliveryArea, color:"#276EF1" },
+  ] : [];
+  return (
+    <div style={{ marginBottom:12 }}>
+      <div style={{ fontSize:11, color:C.muted, fontWeight:600, marginBottom:6, textTransform:"uppercase", letterSpacing:0.5 }}>Route</div>
+      {hasPins && !gmFailed && (
+        <div style={{ borderRadius:10, overflow:"hidden", height:170, marginBottom:8 }}>
+          <GoogleMap height={170} markers={markers} path={path} onUnavailable={() => setGmFailed(true)} />
+        </div>
+      )}
+      <div style={{ ...box, marginBottom:0, display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+        <span>{view.pickupArea} → {view.deliveryArea}</span>
+        <span style={{ fontWeight:800, color: road ? C.green : C.amber }}>
+          {road ? `${metersToKm(view.distanceMeters)} km by road` : "Road distance unavailable"}
+        </span>
+      </div>
+      <div style={{ fontSize:10, color:C.muted, marginTop:4 }}>
+        Exact pickup and delivery addresses are shared after booking.
+      </div>
+    </div>
+  );
+}
+
 /* ── LOAD CARD ──────────────────────────────────────────── */
 function LoadCard({ load, onBook, currency = "KSh" }) {
   const [open, setOpen] = useState(false);
@@ -234,7 +289,7 @@ function LoadCard({ load, onBook, currency = "KSh" }) {
           </div>
           <div style={{ textAlign:"right" }}>
             <div style={{ fontSize:22, fontWeight:800, color:C.black, letterSpacing:-0.5, lineHeight:1 }}>{fmtCurr(load.pay, currency)}</div>
-            {distLabel(load).source!=="unresolved" && <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>{currency==="KSh"?`KSh ${load.rateKm}/km`:fmtCurr(Math.round(load.rateKm),currency)+"/km"}</div>}
+            {distLabel(load).source!=="unresolved" && <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>{distLabel(load).approx?"≈ ":""}{currency==="KSh"?`KSh ${load.rateKm}/km`:fmtCurr(Math.round(load.rateKm),currency)+"/km"}</div>}
           </div>
         </div>
 
@@ -248,8 +303,10 @@ function LoadCard({ load, onBook, currency = "KSh" }) {
             <div style={{ width:1, height:6, background:C.border }} />
             <div style={{ width:36, height:1, background:C.border }} />
             <div style={{ fontSize:10, color:C.muted, fontWeight:600, whiteSpace:"nowrap", textAlign:"center" }} title={distLabel(load).text}>
-              {distLabel(load).source==="unresolved" ? "Distance n/a" : `${load.dist} km`}
-              {load.distSource==="route" && <div style={{ fontSize:9, color:C.green }}>by road</div>}
+              {distLabel(load).source==="unresolved" ? "Distance n/a" : (distLabel(load).approx ? `≈ ${Math.round(load.dist)} km` : `${load.dist} km`)}
+              {load.distSource==="route"
+                ? <div style={{ fontSize:9, color:C.green }}>by road</div>
+                : distLabel(load).approx && distLabel(load).source!=="unresolved" && <div style={{ fontSize:9, color:C.amber }}>estimated</div>}
             </div>
             <div style={{ width:36, height:1, background:C.border }} />
             <div style={{ width:6, height:6, borderRadius:"50%", background:C.black }} />
@@ -319,6 +376,8 @@ function LoadCard({ load, onBook, currency = "KSh" }) {
               <div style={{ fontSize:13, color:C.black, lineHeight:1.5 }}>{load.description}</div>
             </div>
           )}
+
+          <CargoRouteMap load={load} />
 
           {load.penalty > 0 && (
             <div style={{ background:C.amberBg, border:`1px solid ${C.amber}`, borderRadius:8, padding:"10px 14px", marginBottom:10, fontSize:12, fontWeight:700, color:C.amber }}>

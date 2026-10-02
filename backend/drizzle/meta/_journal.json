@@ -36,6 +36,13 @@
       "when": 1790954911577,
       "tag": "0004_yummy_luckman",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790963845013,
+      "tag": "0005_huge_rawhide_kid",
+      "breakpoints": true
     }
   ]
 }
