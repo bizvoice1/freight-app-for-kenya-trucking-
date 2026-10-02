@@ -7,7 +7,7 @@
  * `escrows` (one row per booking) is what's booking-scoped.
  *
  * amount is never accepted from a caller here — every route that creates a
- * Payment must compute it server-side from the booking's load price first
+ * Payment must compute it server-side from the booking's agreedAmount first
  * (non-negotiable #2 of the spec) and pass the already-decided number in.
  */
 
@@ -26,6 +26,10 @@ export const NON_TERMINAL_PAYMENT_STATUSES = new Set([
   PAYMENT_STATUS.STK_SENT,
 ]);
 
+export const PAYMENT_PURPOSE = {
+  INITIAL: "INITIAL", // the agreed price (5D-1); "ADJUSTMENT" arrives with 5D-3
+};
+
 export function generatePaymentId(existingCount) {
   return `PAY-${1000 + existingCount}`;
 }
@@ -40,6 +44,7 @@ export function createPayment({ bookingId, shipperId, amount, phoneNumber }, exi
     amount,
     phoneNumber,
     status:             PAYMENT_STATUS.PENDING,
+    purpose:            PAYMENT_PURPOSE.INITIAL,
     merchantRequestId:  null,
     checkoutRequestId:  null, // set once Daraja's synchronous response arrives
     mpesaReceiptNumber: null, // set exactly once, on first successful callback — never overwritten

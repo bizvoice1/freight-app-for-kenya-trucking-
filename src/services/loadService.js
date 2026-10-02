@@ -102,6 +102,18 @@ function _hydrate() {
   } catch { /* corrupted storage — start fresh */ }
 }
 
+/**
+ * Phase 5D-1 — the decorative localStorage bids (behari_bids_<loadId>) are retired in
+ * favour of backend offers (docs/5D-PRICING-SPEC.md 9.5). Removed once per browser.
+ */
+function _purgeLegacyBids() {
+  try {
+    if (localStorage.getItem("behari_bids_purged_5d")) return;
+    Object.keys(localStorage).filter(k => k.startsWith("behari_bids_")).forEach(k => localStorage.removeItem(k));
+    localStorage.setItem("behari_bids_purged_5d", "1");
+  } catch { /* storage unavailable — nothing to purge */ }
+}
+
 const _store = {
   postedLoads:   [],
   bookings:      [],
@@ -119,6 +131,7 @@ const _store = {
 
 // Restore saved state immediately on module load
 _hydrate();
+_purgeLegacyBids();
 
 /* ── Internal helpers ────────────────────────────────────────────────────── */
 
@@ -214,9 +227,8 @@ export function getDispute(loadId) {
 export function createLoad(formData) {
   const newLoad = createLoadFromForm(formData, _store.postedLoads.length);
   _store.postedLoads = [newLoad, ..._store.postedLoads];
-  // Initialise escrow immediately on load creation
-  _initEscrow(newLoad.id);
-  _addMilestone(newLoad.id, "🔒", `Escrow locked — KSh ${newLoad.pay.toLocaleString()} held`);
+  // 5D-1: no money moves at posting, so no simulated escrow is created here.
+  _addMilestone(newLoad.id, "📣", `Load posted at KSh ${newLoad.pay.toLocaleString()}`);
   return Promise.resolve(newLoad);
 }
 

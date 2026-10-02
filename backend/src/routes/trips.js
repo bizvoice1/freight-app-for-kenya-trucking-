@@ -40,7 +40,7 @@ import {
 import { TRUCK_STATUS } from "../../../src/models/truck.js";
 import { DRIVER_STATUS } from "../../../src/models/driver.js";
 import { ESCROW_STATUS, evaluateReleaseEligibility } from "../domain/escrow.js";
-import { logPaymentEvent } from "../services/ledger.js";
+import { logPaymentEvent, flagReconciliation, loadLedgerSync } from "../services/ledger.js";
 import { NOTIFICATION_TYPE } from "../domain/notification.js";
 import { notifyUser, notifyUsers, allAdminUserIds } from "../services/notifications.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -208,10 +208,15 @@ async function maybeMakeEscrowEligibleForRelease(trip, requestId) {
   const [booking] = await db.select().from(bookings).where(eq(bookings.id, trip.bookingId));
   if (!booking) return;
   const [escrow] = await db.select().from(escrows).where(eq(escrows.bookingId, booking.id));
-  const [load] = booking.loadId ? await db.select().from(loads).where(eq(loads.id, booking.loadId)) : [null];
+  const ledger = loadLedgerSync(db, booking.id);
 
-  const decision = evaluateReleaseEligibility({ trip, booking, escrow: escrow || null, loadPrice: load?.price ?? null });
-  if (!decision.eligible) return;
+  const decision = evaluateReleaseEligibility({ trip, booking, escrow: escrow || null, ledger });
+  if (!decision.eligible) {
+    if (decision.mismatch) {
+      await flagReconciliation("escrow_ledger_mismatch", "escrow", escrow.id, { tripId: trip.id, bookingId: booking.id, ledger });
+    }
+    return;
+  }
 
   const now = new Date().toISOString();
   await db.update(escrows).set({ status: ESCROW_STATUS.RELEASE_PENDING, releasePendingAt: now, updatedAt: now }).where(eq(escrows.id, escrow.id));

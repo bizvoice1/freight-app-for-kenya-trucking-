@@ -104,32 +104,44 @@ export function createEscrow({ bookingId, paymentId, amount }, existingCount) {
 }
 
 /**
- * Phase 4K-D — the "don't blindly send money" rule. Pure: takes the trip,
- * booking, escrow and the load's current price as plain data and returns a
- * decision; never calls Daraja, never touches the database itself. Callers
- * (routes/trips.js's Delivered hook) are responsible for acting on the
- * result.
+ * Phase 4K-D / 5D-1 — the "don't blindly send money" rule. Pure: takes the
+ * trip, booking, escrow and the booking's ledger (domain/ledger.js
+ * computeLedger) as plain data and returns a decision; never calls Daraja,
+ * never touches the database itself. Callers (routes/trips.js's Delivered
+ * hook) act on the result.
  *
- * @param {{trip:Object, booking:Object, escrow:Object|null, loadPrice:number|null}} args
+ * 5D-1 replaces the old `loads.price === escrow.amount` comparison: a load's
+ * posted price is not financial truth once a booking exists. The escrow must
+ * equal what is owed (I7) and what was actually confirmed paid (I6), and no
+ * adjustment may be unresolved. `mismatch` is true only for an I6 violation so
+ * the caller can raise a reconciliation flag.
+ *
+ * @param {{trip:Object, booking:Object, escrow:Object|null, ledger:Object}} args
  */
-export function evaluateReleaseEligibility({ trip, booking, escrow, loadPrice }) {
+export function evaluateReleaseEligibility({ trip, booking, escrow, ledger }) {
   if (trip.status !== "Delivered") {
-    return { eligible: false, reason: "Trip is not yet Delivered." };
+    return { eligible: false, mismatch: false, reason: "Trip is not yet Delivered." };
   }
   if (!escrow) {
-    return { eligible: false, reason: "No escrow exists for this booking (payment not completed)." };
+    return { eligible: false, mismatch: false, reason: "No escrow exists for this booking (payment not completed)." };
   }
   if (escrow.status !== ESCROW_STATUS.HELD) {
-    return { eligible: false, reason: `Escrow is ${escrow.status}, not Held.` };
+    return { eligible: false, mismatch: false, reason: `Escrow is ${escrow.status}, not Held.` };
   }
   if (escrow.bookingId !== booking.id) {
-    return { eligible: false, reason: "Escrow/booking mismatch." };
+    return { eligible: false, mismatch: false, reason: "Escrow/booking mismatch." };
   }
-  // Amount sanity check — the escrow must still equal what the booking's
-  // load is currently priced at. Catches tampering or a data-integrity bug
-  // rather than silently paying out an amount nobody actually agreed to.
-  if (typeof loadPrice === "number" && loadPrice !== escrow.amount) {
-    return { eligible: false, reason: `Escrow amount (${escrow.amount}) no longer matches the load's price (${loadPrice}).` };
+  if (ledger.totalObligation === null) {
+    return { eligible: false, mismatch: false, reason: "Booking has no agreed amount." };
   }
-  return { eligible: true, reason: null };
+  if (ledger.escrowMatchesFunding === false) {
+    return { eligible: false, mismatch: true, reason: `Escrow amount (${escrow.amount}) does not equal confirmed funding (${ledger.confirmedFunding}).` };
+  }
+  if (ledger.blockingAdjustments > 0) {
+    return { eligible: false, mismatch: false, reason: "An adjustment is still unresolved." };
+  }
+  if (escrow.amount !== ledger.totalObligation) {
+    return { eligible: false, mismatch: false, reason: `Escrow amount (${escrow.amount}) does not equal the total obligation (${ledger.totalObligation}).` };
+  }
+  return { eligible: true, mismatch: false, reason: null };
 }

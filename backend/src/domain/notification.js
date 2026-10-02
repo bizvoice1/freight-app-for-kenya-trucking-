@@ -18,6 +18,10 @@ export const NOTIFICATION_TYPE = {
   PAYOUT_CONFIRMED:  "payout_confirmed",   // -> the transporter
   PAYOUT_FAILED:     "payout_failed",      // -> the transporter + every admin (a retry needs admin action)
   TRIP_STATUS:       "trip_status",        // -> the shipper + the transporter
+  OFFER_RECEIVED:    "offer_received",     // -> the shipper (a transporter opened a thread)
+  OFFER_COUNTERED:   "offer_countered",    // -> the previous proposer
+  OFFER_ACCEPTED:    "offer_accepted",     // -> the accepted offer's proposer
+  OFFER_REJECTED:    "offer_rejected",     // -> the rejected/closed offer's proposer
 };
 
 export function generateNotificationId(existingCount) {

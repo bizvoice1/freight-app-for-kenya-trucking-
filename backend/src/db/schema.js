@@ -25,7 +25,7 @@
  *     identically once the column type becomes Postgres `timestamptz`.
  */
 
-import { sqliteTable, text, real, integer, unique, uniqueIndex, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, real, integer, unique, uniqueIndex, index, check } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const fleetOwners = sqliteTable("fleet_owners", {
@@ -140,6 +140,13 @@ export const bookings = sqliteTable("bookings", {
   // Phase 5C-3 — immutable snapshot of loads.distance_meters at booking time.
   agreedRoadDistanceMeters: integer("agreed_road_distance_meters"),
   status:        text("status").notNull(), // "Accepted" | "Assigned" | "Trip Created" | "Cancelled"
+  // Phase 5D-1 — the agreed price is financial truth, snapshotted once at
+  // booking insert (immutable by trigger). Nullable at the schema level only:
+  // a legacy booking whose load had no price keeps null. Every booking created
+  // after 5D has a positive value.
+  agreedAmount:    real("agreed_amount"),
+  agreementSource: text("agreement_source"), // "POSTED_PRICE" | "OFFER"
+  agreedOfferId:   text("agreed_offer_id"),  // offers.id; null for POSTED_PRICE
   createdAt:     text("created_at").notNull(),
   updatedAt:     text("updated_at").notNull(),
 }, (table) => ({
@@ -219,6 +226,7 @@ export const payments = sqliteTable("payments", {
   mpesaReceiptNumber: text("mpesa_receipt_number"),
   resultCode:         integer("result_code"),
   resultDesc:         text("result_desc"),
+  purpose:            text("purpose").notNull().default("INITIAL"), // Phase 5D-1 — "INITIAL" now; "ADJUSTMENT" arrives in 5D-3
   createdAt:          text("created_at").notNull(),
   updatedAt:          text("updated_at").notNull(),
 }, (table) => ({
@@ -328,4 +336,46 @@ export const notifications = sqliteTable("notifications", {
   createdAt:         text("created_at").notNull(),
 }, (table) => ({
   userIdIdx: index("notifications_user_id_idx").on(table.userId),
+}));
+
+
+/**
+ * Phase 5D-1 — one row per offer in a negotiation thread (loadId,
+ * transporterId). A counter never edits a row: it marks the parent COUNTERED
+ * and inserts the next. Actor-neutral cap: a thread holds at most 5 rows
+ * whichever party proposed them (CHECK + UNIQUE below make that physical).
+ * See docs/5D-PRICING-SPEC.md Section 3.1 / 4.1.
+ */
+export const offers = sqliteTable("offers", {
+  id:             text("id").primaryKey(),
+  loadId:         text("load_id").notNull(),
+  transporterId:  text("transporter_id").notNull(),
+  round:          integer("round").notNull(),
+  proposerRole:   text("proposer_role").notNull(), // "transporter" | "shipper"
+  proposerId:     text("proposer_id").notNull(),
+  amount:         real("amount").notNull(),
+  note:           text("note"),
+  status:         text("status").notNull(), // PENDING|COUNTERED|ACCEPTED|REJECTED|EXPIRED|WITHDRAWN
+  closeReason:    text("close_reason"),
+  expiresAt:      text("expires_at").notNull(),
+  parentOfferId:  text("parent_offer_id"),
+  idempotencyKey: text("idempotency_key"),
+  createdAt:      text("created_at").notNull(),
+  updatedAt:      text("updated_at").notNull(),
+  resolvedAt:     text("resolved_at"),
+}, (table) => ({
+  roundRange:      check("offers_round_range", sql`${table.round} between 1 and 5`),
+  threadRoundUnique: uniqueIndex("offers_thread_round_unique").on(table.loadId, table.transporterId, table.round),
+  onePendingPerThread: uniqueIndex("offers_one_pending_per_thread")
+    .on(table.loadId, table.transporterId)
+    .where(sql`${table.status} = 'PENDING'`),
+  oneAcceptedPerLoad: uniqueIndex("offers_one_accepted_per_load")
+    .on(table.loadId)
+    .where(sql`${table.status} = 'ACCEPTED'`),
+  idempotencyUnique: uniqueIndex("offers_proposer_idempotency_unique")
+    .on(table.proposerId, table.idempotencyKey)
+    .where(sql`${table.idempotencyKey} is not null`),
+  loadIdIdx:        index("offers_load_id_idx").on(table.loadId),
+  transporterIdIdx: index("offers_transporter_id_idx").on(table.transporterId),
+  statusExpiryIdx:  index("offers_status_expires_idx").on(table.status, table.expiresAt),
 }));

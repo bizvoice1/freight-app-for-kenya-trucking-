@@ -386,7 +386,9 @@ function LoadCard({ load, onBook, currency = "KSh" }) {
           )}
 
           <div style={{ background:C.greenBg, borderRadius:8, padding:"10px 14px", marginBottom:12, fontSize:12, color:C.green, fontWeight:600 }}>
-            📱 Payment held in M-Pesa escrow · Released on delivery confirmation
+            {load.backendLoadId
+              ? "📱 Shipper pays the agreed amount into M-Pesa escrow after booking · Released on delivery confirmation"
+              : "📱 Payment held in M-Pesa escrow · Released on delivery confirmation"}
           </div>
           <button onClick={() => onBook(load)} style={{ width:"100%", background:C.black, color:C.white, border:"none", borderRadius:8, padding:14, fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:font }}>
             Book Load
@@ -401,8 +403,6 @@ function LoadCard({ load, onBook, currency = "KSh" }) {
 function BookModal({ load, onClose, onBookLoad, activePlates = new Set(), fraudFlags = {} }) {
   const [step, setStep]           = useState("truck"); // "truck" | "confirm" | "done"
   const [selectedTruck, setSelectedTruck] = useState(null);
-  const [showOffer,  setShowOffer]  = useState(false);
-  const [offerPrice, setOfferPrice] = useState("");
 
   /* Feature 18 — blacklist check for current carrier */
   const MY_CARRIER_ID = "james-mwangi"; // demo carrier ID
@@ -428,14 +428,6 @@ function BookModal({ load, onClose, onBookLoad, activePlates = new Set(), fraudF
   }
 
   function handleConfirm() {
-    // Save counter-offer bid to localStorage for shipper to review
-    if (showOffer && Number(offerPrice) > 0) {
-      try {
-        const bids = JSON.parse(localStorage.getItem(`behari_bids_${load.id}`) || "[]");
-        bids.push({ carrier:"James Mwangi", plate:selectedTruck.plate, amount:Number(offerPrice), time:new Date().toLocaleTimeString("en-KE",{hour:"2-digit",minute:"2-digit"}) });
-        localStorage.setItem(`behari_bids_${load.id}`, JSON.stringify(bids));
-      } catch (_) {}
-    }
     onBookLoad({
       loadId:    load.id,
       cargo:     load.cargo,
@@ -565,39 +557,8 @@ function BookModal({ load, onClose, onBookLoad, activePlates = new Set(), fraudF
           ))}
         </div>
 
-        {/* Counter-offer toggle */}
-        <div style={{ marginBottom:16 }}>
-          <div
-            onClick={()=>setShowOffer(v=>!v)}
-            style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",background:C.bg,borderRadius:8,cursor:"pointer",border:`1.5px solid ${showOffer?C.black:C.border}`,transition:"all 0.15s" }}
-          >
-            <span style={{ fontSize:13,fontWeight:700,color:C.black }}>💸 Make a counter-offer</span>
-            <span style={{ fontSize:12,color:C.muted,fontWeight:700 }}>{showOffer?"▲":"▼"}</span>
-          </div>
-          {showOffer && (
-            <div style={{ marginTop:8,background:C.bg,borderRadius:8,padding:"12px 14px",border:`1.5px solid ${C.black}` }}>
-              <div style={{ fontSize:12,color:C.secondary,fontWeight:600,marginBottom:10 }}>
-                Listed: KSh {load.pay.toLocaleString()}. Your offer goes to the shipper for review.
-              </div>
-              <div style={{ position:"relative" }}>
-                <span style={{ position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:13,fontWeight:700,color:C.muted,pointerEvents:"none" }}>KSh</span>
-                <input
-                  type="number" value={offerPrice} onChange={e=>setOfferPrice(e.target.value)}
-                  placeholder={String(load.pay)}
-                  style={{ width:"100%",paddingLeft:44,padding:"12px 14px 12px 44px",background:C.white,border:`1.5px solid ${C.border}`,borderRadius:8,fontSize:14,fontFamily:font,color:C.black,outline:"none",boxSizing:"border-box" }}
-                />
-              </div>
-              {Number(offerPrice) > 0 && (
-                <div style={{ marginTop:8,fontSize:11,color:C.green,fontWeight:600 }}>
-                  ✓ Bid of KSh {Number(offerPrice).toLocaleString()} will be submitted alongside booking.
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
         <button onClick={handleConfirm} style={{ width:"100%",background:C.black,color:C.white,border:"none",borderRadius:8,padding:16,fontSize:16,fontWeight:700,cursor:"pointer",fontFamily:font }}>
-          {showOffer && Number(offerPrice) > 0 ? `Book + Offer KSh ${Number(offerPrice).toLocaleString()}` : "Confirm Booking"}
+          Confirm Booking
         </button>
       </div>
     </div>

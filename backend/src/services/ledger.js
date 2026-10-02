@@ -8,7 +8,9 @@
  */
 
 import { db } from "../db/client.js";
-import { paymentEvents, reconciliationFlags } from "../db/schema.js";
+import { paymentEvents, reconciliationFlags, payments, escrows, bookings } from "../db/schema.js";
+import { eq } from "drizzle-orm";
+import { computeLedger } from "../domain/ledger.js";
 
 /**
  * @param {"payment"|"escrow"|"payout"} entityType
@@ -52,4 +54,34 @@ export async function flagReconciliation(type, relatedEntityType, relatedEntityI
     createdAt:         new Date().toISOString(),
     resolvedAt:        null,
   });
+}
+
+/**
+ * Phase 5D-1 — synchronous audit insert for use INSIDE a db.transaction().
+ * logPaymentEvent above is async and cannot run inside better-sqlite3's
+ * synchronous transaction callback; offer acceptance must write its audit rows
+ * atomically with the booking, so it inserts directly through `tx`.
+ */
+export function logPaymentEventSync(tx, entityType, entityId, eventType, fromStatus, toStatus, payload, requestId) {
+  const count = tx.select().from(paymentEvents).all().length;
+  tx.insert(paymentEvents).values({
+    id:         `EVT-${1000 + count}`,
+    entityType,
+    entityId,
+    eventType,
+    fromStatus: fromStatus ?? null,
+    toStatus:   toStatus ?? null,
+    payload:    payload !== undefined ? JSON.stringify(payload) : null,
+    requestId:  requestId ?? null,
+    createdAt:  new Date().toISOString(),
+  }).run();
+}
+
+/** Reads a booking's rows and returns domain/ledger.js's totals. Works with `db` or a transaction handle (synchronous). */
+export function loadLedgerSync(dbOrTx, bookingId) {
+  const booking = dbOrTx.select().from(bookings).where(eq(bookings.id, bookingId)).get();
+  if (!booking) return null;
+  const rows = dbOrTx.select().from(payments).where(eq(payments.bookingId, bookingId)).all();
+  const escrow = dbOrTx.select().from(escrows).where(eq(escrows.bookingId, bookingId)).get() || null;
+  return computeLedger({ booking, payments: rows, escrow });
 }

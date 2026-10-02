@@ -57,9 +57,12 @@ const STATUS_MAP = {
 // toShipperShipmentView() instead of being re-derived separately in every
 // component that merged SHIPMENTS_SEED locally.
 
-function Pill({ status }) {
+// 5D-1: for a backend-linked load no money is held, so the local "Escrow Held" status reads "Open".
+const statusLabel = (load) => (load.backendLoadId && load.status === "Escrow Held" ? "Open" : load.status);
+
+function Pill({ status, label }) {
   const s = STATUS_MAP[status] || { color:C.muted, bg:C.bg };
-  return <span style={{ background:s.bg, color:s.color, fontSize:11, fontWeight:700, borderRadius:100, padding:"3px 10px" }}>{status}</span>;
+  return <span style={{ background:s.bg, color:s.color, fontSize:11, fontWeight:700, borderRadius:100, padding:"3px 10px" }}>{label || status}</span>;
 }
 
 function ProgressBar({ value }) {
@@ -73,8 +76,7 @@ function ProgressBar({ value }) {
 /* ── POST CARGO MODAL ───────────────────────────────────── */
 function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatchesForCargo = ()=>Promise.resolve([]), onRequestMatch = ()=>{}, onCheckNewCargoForMatches = ()=>{} }) {
   const [step,        setStep]        = useState(1);
-  const [escrowState, setEscrowState] = useState("idle"); // idle | sending | locked | matching | posted
-  const [countdown,   setCountdown]   = useState(3);
+  const [escrowState, setEscrowState] = useState("idle"); // idle | matching | posted
   const [createdLoad,   setCreatedLoad]   = useState(null);
   const [matchesFound,  setMatchesFound]  = useState([]);
   const [loadingMatches,setLoadingMatches]= useState(false);
@@ -110,18 +112,7 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
     !_dateInv
   );
 
-  function sendMpesa() {
-    setEscrowState("sending");
-    let c = 3;
-    setCountdown(c);
-    const timer = setInterval(() => {
-      c--;
-      setCountdown(c);
-      if (c <= 0) { clearInterval(timer); setEscrowState("locked"); }
-    }, 1000);
-  }
-
-  /* After escrow locks, post the cargo, then immediately run the matching
+  /* Post the cargo, then immediately run the matching
    * engine against declared truck availabilities — "MATCHING TRUCKS" — before
    * falling through to the existing success screen. */
   async function finalizePost() {
@@ -142,14 +133,14 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
         <div style={{ background:C.white,borderRadius:16,width:"100%",maxWidth:480,padding:"32px 24px",textAlign:"center" }}>
           <div style={{ fontSize:60,marginBottom:12 }}>🎉</div>
           <div style={{ fontSize:26,fontWeight:900,color:C.black,marginBottom:6 }}>Load Posted!</div>
-          <div style={{ fontSize:14,color:C.secondary,marginBottom:24 }}>Payment secured. Drivers are being notified now.</div>
+          <div style={{ fontSize:14,color:C.secondary,marginBottom:24 }}>Your cargo is live. Transporters can now accept it or make an offer.</div>
           <div style={{ background:C.greenBg,border:`1.5px solid ${C.green}`,borderRadius:12,padding:"16px 18px",marginBottom:24,textAlign:"left" }}>
-            <div style={{ fontSize:11,fontWeight:800,color:C.green,letterSpacing:0.8,textTransform:"uppercase",marginBottom:10 }}>🔒 Escrow Active</div>
+            <div style={{ fontSize:11,fontWeight:800,color:C.green,letterSpacing:0.8,textTransform:"uppercase",marginBottom:10 }}>What happens next</div>
             {[
-              `KSh ${budgetNum.toLocaleString()} locked safely`,
-              "Driver will be matched within 2–4 hours",
+              `Posted price: KSh ${budgetNum.toLocaleString()}`,
+              "A transporter accepts or negotiates a price",
+              "You pay the agreed amount into escrow",
               "Payment releases only after delivery confirmation",
-              "Disputes handled by Behari support team",
             ].map(t => (
               <div key={t} style={{ display:"flex",alignItems:"flex-start",gap:8,marginBottom:7,fontSize:13,fontWeight:600,color:C.black }}>
                 <span style={{ color:C.green }}>✅</span><span>{t}</span>
@@ -173,7 +164,7 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
           <div>
             <div style={{ fontSize:11,color:C.muted,fontWeight:700,letterSpacing:0.8,textTransform:"uppercase",marginBottom:2 }}>Step {step} of 2</div>
             <div style={{ fontSize:22,fontWeight:800,color:C.black }}>
-              {step===1 ? "Post Your Cargo" : "Secure Payment"}
+              {step===1 ? "Post Your Cargo" : "Review & Post"}
             </div>
           </div>
           <button onClick={onClose} style={{ background:C.bg,border:"none",borderRadius:"50%",width:34,height:34,cursor:"pointer",fontSize:16,color:C.secondary }}>✕</button>
@@ -373,7 +364,7 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
             disabled={!step1Valid}
             style={{ width:"100%",background:step1Valid?C.black:"#C8C8C8",color:C.white,border:"none",borderRadius:8,padding:14,fontSize:15,fontWeight:800,cursor:step1Valid?"pointer":"not-allowed",fontFamily:font,transition:"background 0.2s" }}
           >
-            Continue → Secure Payment
+            Continue → Review & Post
           </button>
         </>}
 
@@ -402,108 +393,31 @@ function PostModal({ onClose, onPostLoad, truckAvailabilities = [], onFindMatche
             ))}
           </div>
 
-          {/* Why escrow — dark card */}
-          <div style={{ background:"#0D0D0D",borderRadius:14,padding:"18px 18px",marginBottom:16,color:C.white }}>
-            <div style={{ fontSize:16,fontWeight:800,marginBottom:6 }}>🔒 Why pay into escrow?</div>
-            <div style={{ fontSize:12,color:"rgba(255,255,255,0.55)",lineHeight:1.6,marginBottom:14 }}>
-              Instead of paying the driver directly, your funds are locked safely in the app. No one can touch them until delivery is confirmed.
+          {/* 5D-1 — nothing is paid at posting; escrow starts only after a price is agreed */}
+          <div data-testid="no-payment-at-post" style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:14,padding:"16px 18px",marginBottom:16 }}>
+            <div style={{ fontSize:15,fontWeight:800,color:C.black,marginBottom:6 }}>No payment is taken now</div>
+            <div style={{ fontSize:12,color:C.secondary,lineHeight:1.6 }}>
+              Posting is free. Transporters can accept your posted price of <strong>KSh {budgetNum.toLocaleString()}</strong> or make an offer.
+              Once you and a transporter agree an amount, you pay it into escrow, and it is released only after delivery is confirmed.
             </div>
-
-            <div style={{ fontSize:10,fontWeight:800,color:"rgba(255,255,255,0.4)",letterSpacing:1,textTransform:"uppercase",marginBottom:8 }}>The transporter knows:</div>
-            {["✅  Payment exists","✅  Customer is serious","✅  Funds are secured"].map(t=>(
-              <div key={t} style={{ fontSize:13,fontWeight:600,color:C.white,marginBottom:6 }}>{t}</div>
-            ))}
-
-            <div style={{ height:1,background:"rgba(255,255,255,0.08)",margin:"12px 0" }} />
-
-            <div style={{ fontSize:10,fontWeight:800,color:"rgba(255,255,255,0.4)",letterSpacing:1,textTransform:"uppercase",marginBottom:8 }}>You know:</div>
-            {["✅  Driver won't disappear with cargo","✅  Payment only releases after delivery"].map(t=>(
-              <div key={t} style={{ fontSize:13,fontWeight:600,color:C.white,marginBottom:6 }}>{t}</div>
-            ))}
-
-            <div style={{ marginTop:12,background:"rgba(6,193,103,0.15)",border:"1px solid rgba(6,193,103,0.3)",borderRadius:8,padding:"8px 12px",fontSize:11,color:C.green,fontWeight:700 }}>
-              🏆 This is a huge trust builder in African logistics.
-            </div>
-          </div>
-
-          {/* Amount chip */}
-          <div style={{ background:C.greenBg,border:`1.5px solid ${C.green}`,borderRadius:12,padding:"14px 18px",marginBottom:18,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-            <div>
-              <div style={{ fontSize:10,fontWeight:800,color:C.green,letterSpacing:0.8,textTransform:"uppercase",marginBottom:3 }}>Amount to Deposit</div>
-              <div style={{ fontSize:28,fontWeight:900,color:C.black,letterSpacing:-0.5 }}>KSh {budgetNum.toLocaleString()}</div>
-            </div>
-            <span style={{ fontSize:36 }}>💵</span>
           </div>
 
           {/* ── IDLE: show phone + send button ─────────────────── */}
           {escrowState==="idle" && <>
-            <label style={lbl}>M-Pesa Phone Number</label>
+            <label style={lbl}>Contact Phone</label>
             <input style={inp} placeholder="+254 7XX XXX XXX" value={form.phone} onChange={e=>set("phone",e.target.value)} />
             <div style={{ display:"flex",gap:8 }}>
               <button onClick={()=>setStep(1)} style={{ flex:1,background:C.bg,color:C.black,border:`1px solid ${C.border}`,borderRadius:8,padding:13,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:font }}>
                 ← Back
               </button>
               <button
-                onClick={sendMpesa}
-                style={{ flex:2,background:"#00A651",color:C.white,border:"none",borderRadius:8,padding:13,fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:font }}
-              >
-                📱 Send M-Pesa Prompt
-              </button>
-            </div>
-          </>}
-
-          {/* ── SENDING: spinner + countdown ───────────────────── */}
-          {escrowState==="sending" && (
-            <div style={{ textAlign:"center",padding:"10px 0 20px" }}>
-              <div style={{ fontSize:46,marginBottom:14 }}>📱</div>
-              <div style={{ fontSize:18,fontWeight:800,color:C.black,marginBottom:6 }}>M-Pesa Prompt Sent!</div>
-              <div style={{ fontSize:13,color:C.secondary,marginBottom:2 }}>Check your phone: {form.phone}</div>
-              <div style={{ fontSize:13,color:C.secondary,marginBottom:20 }}>Enter your M-Pesa PIN to confirm.</div>
-              <div style={{ position:"relative",width:64,height:64,margin:"0 auto 10px" }}>
-                <svg viewBox="0 0 64 64" style={{ width:64,height:64,animation:"spin 1s linear infinite",position:"absolute",top:0,left:0 }}>
-                  <circle cx="32" cy="32" r="28" fill="none" stroke={C.border} strokeWidth="5" />
-                  <circle cx="32" cy="32" r="28" fill="none" stroke={C.green} strokeWidth="5" strokeDasharray="60 120" strokeLinecap="round" />
-                </svg>
-                <div style={{ position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,fontWeight:900,color:C.black }}>{countdown}</div>
-              </div>
-              <div style={{ fontSize:12,color:C.muted }}>Confirming payment…</div>
-              <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
-            </div>
-          )}
-
-          {/* ── LOCKED: escrow confirmation ─────────────────────── */}
-          {escrowState==="locked" && (
-            <div style={{ textAlign:"center" }}>
-              <div style={{ fontSize:52,marginBottom:10 }}>🔐</div>
-              <div style={{ fontSize:20,fontWeight:800,color:C.black,marginBottom:4 }}>Funds Locked in Escrow</div>
-              <div style={{ fontSize:13,color:C.secondary,marginBottom:18 }}>
-                KSh {budgetNum.toLocaleString()} is safely secured · Nobody can touch it until delivery
-              </div>
-
-              <div style={{ background:C.greenBg,border:`2px solid ${C.green}`,borderRadius:12,padding:"16px 18px",marginBottom:22,textAlign:"left" }}>
-                {[
-                  ["Payment received and verified",          true],
-                  ["Funds locked — cannot be released early", true],
-                  ["Customer commitment confirmed",           true],
-                  ["Driver won't disappear with cargo",       true],
-                  ["Payment releases on delivery confirmation",true],
-                  ["Disputes handled by Behari support",      true],
-                ].map(([t]) => (
-                  <div key={t} style={{ display:"flex",alignItems:"flex-start",gap:10,marginBottom:9,fontSize:13,fontWeight:600,color:C.black }}>
-                    <span style={{ color:C.green,fontSize:15,flexShrink:0 }}>✅</span>
-                    <span>{t}</span>
-                  </div>
-                ))}
-              </div>
-
-              <button
                 onClick={finalizePost}
-                style={{ width:"100%",background:C.black,color:C.white,border:"none",borderRadius:8,padding:15,fontSize:15,fontWeight:800,cursor:"pointer",fontFamily:font }}
+                style={{ flex:2,background:C.black,color:C.white,border:"none",borderRadius:8,padding:13,fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:font }}
               >
                 🚛 Post Cargo &amp; Find Trucks
               </button>
             </div>
-          )}
+          </>}
 
           {/* ── MATCHING TRUCKS ─────────────────────────────────── */}
           {escrowState==="matching" && (
@@ -983,7 +897,7 @@ function DetailModal({ s, onClose, onConfirmDelivery = ()=>{}, escrowData = {}, 
             <div style={{ fontSize:11,color:C.muted,marginBottom:4 }}>{s.id}</div>
             <div style={{ fontSize:22,fontWeight:800,color:C.black }}>{s.cargo}</div>
           </div>
-          <Pill status={status} />
+          <Pill status={status} label={statusLabel(s)} />
         </div>
 
         {/* Progress */}
@@ -1025,6 +939,18 @@ function DetailModal({ s, onClose, onConfirmDelivery = ()=>{}, escrowData = {}, 
             💬 Chat
           </button>
         </div>
+
+        {/* 5D-1 — negotiation will attach here; demo loads have no backend record */}
+        {!isDelivered && !s.backendLoadId && (
+          <div data-testid="demo-load-note" style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",marginBottom:16,fontSize:12,color:C.muted,fontWeight:600 }}>
+            Demo load — negotiation unavailable
+          </div>
+        )}
+        {!isDelivered && s.backendLoadId && (
+          <div data-testid="linked-load-note" style={{ background:C.bg,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",marginBottom:16,fontSize:12,color:C.secondary,fontWeight:600 }}>
+            Commercial record linked · {s.backendLoadId}
+          </div>
+        )}
 
         {/* Feature 10 — Auction / bid panel */}
         {s.auctionMode && (
@@ -1080,7 +1006,7 @@ function DetailModal({ s, onClose, onConfirmDelivery = ()=>{}, escrowData = {}, 
         {s.truckCount > 1 && <MultiTruckPanel slots={slots} truckCount={s.truckCount || 1} />}
 
         {/* Escrow status banner */}
-        {escrow && (
+        {escrow && !s.backendLoadId && (
           <div style={{ background: isReadyForRelease?C.greenBg:C.amberBg, borderRadius:8, padding:"10px 14px", marginBottom:16, fontSize:12, fontWeight:600, color: isReadyForRelease?C.green:C.amber }}>
             🔒 Escrow: {escrow.status} · KSh {s.pay.toLocaleString()}
           </div>
@@ -1424,7 +1350,7 @@ function Dashboard({ onPost, onDetail, allShipments = [] }) {
             <div>
               <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
                 <span style={{ fontSize:11,color:C.muted }}>{s.id}</span>
-                <Pill status={s.status} />
+                <Pill status={s.status} label={statusLabel(s)} />
               </div>
               <div style={{ fontSize:17,fontWeight:700,color:C.black }}>{s.cargo}</div>
               <div style={{ fontSize:13,color:C.secondary }}>{s.from} → {s.to}</div>
@@ -1500,7 +1426,7 @@ function Shipments({ onDetail, allShipments = [] }) {
           <div style={{ display:"flex",justifyContent:"space-between",marginBottom:8 }}>
             <div style={{ display:"flex",alignItems:"center",gap:8 }}>
               <span style={{ fontSize:11,color:C.muted }}>{s.id}</span>
-              <Pill status={s.status} />
+              <Pill status={s.status} label={statusLabel(s)} />
               {s.recurring && <span style={{ background:C.amberBg,color:C.amber,fontSize:9,fontWeight:700,borderRadius:100,padding:"2px 6px" }}>♻ REPEAT</span>}
               {s.auctionMode && <span style={{ background:C.blueBg,color:C.blue,fontSize:9,fontWeight:700,borderRadius:100,padding:"2px 6px" }}>🏷 AUCTION</span>}
             </div>

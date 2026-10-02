@@ -188,7 +188,7 @@ router.post("/:bookingId/create-trip", requireRole("fleet_owner"), asyncHandler(
  * body: { phoneNumber }
  *
  * Phase 4K-B (docs/4K-DARAJA-SPEC.md Section 3). amount is NEVER read from
- * the request body — it is the booking's load price, computed here,
+ * the request body — it is the booking's agreedAmount (5D-1), computed here,
  * server-side, before Daraja is ever called (non-negotiable #2). Rejecting
  * a second attempt while a non-terminal one exists is idempotency layer #1
  * of Section 2.5's five ("STK request duplicated").
@@ -212,8 +212,9 @@ router.post("/:bookingId/payment", requireRole("shipper"), asyncHandler(async (r
   if (!(booking.agreedRoadDistanceMeters > 0)) {
     return res.status(ROAD_DISTANCE_REQUIRED.status).json(ROAD_DISTANCE_REQUIRED.body);
   }
-  if (typeof load.price !== "number") {
-    return res.status(400).json({ error: `Load ${load.id} has no price set — cannot initiate payment.` });
+  // 5D-1: the amount owed is the booking's agreedAmount (snapshotted at accept), never the load's mutable price.
+  if (typeof booking.agreedAmount !== "number") {
+    return res.status(409).json({ error: `Booking ${booking.id} has no agreed amount — cannot initiate payment.`, code: "NO_AGREED_AMOUNT" });
   }
 
   const { phoneNumber, testOutcome, testForceReceipt, testDelayMs } = req.body || {};
@@ -225,7 +226,7 @@ router.post("/:bookingId/payment", requireRole("shipper"), asyncHandler(async (r
   }
 
   const count = (await db.select().from(payments)).length;
-  const payment = createPayment({ bookingId: booking.id, shipperId: req.user.id, amount: load.price, phoneNumber }, count);
+  const payment = createPayment({ bookingId: booking.id, shipperId: req.user.id, amount: booking.agreedAmount, phoneNumber }, count);
   try {
     await db.insert(payments).values(payment);
   } catch (err) {

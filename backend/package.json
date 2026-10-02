@@ -16,7 +16,8 @@
     "test:4m": "node scripts/attack-suite-4m.mjs",
     "test:5c1": "node scripts/acceptance-5c1.mjs",
     "test:5c2": "node scripts/acceptance-5c2.mjs",
-    "test:5c3": "node scripts/acceptance-5c3.mjs"
+    "test:5c3": "node scripts/acceptance-5c3.mjs",
+    "test:5d": "node scripts/acceptance-5d.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",

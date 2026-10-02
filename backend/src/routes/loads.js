@@ -7,16 +7,17 @@
 
 import { Router } from "express";
 import { eq, and, desc } from "drizzle-orm";
-import { db, isUniqueConstraintError } from "../db/client.js";
-import { loads, bookings } from "../db/schema.js";
+import { db } from "../db/client.js";
+import { loads } from "../db/schema.js";
 import { requireAuth, requireRole } from "../auth/middleware.js";
 import { createLoad, parsePlace, LOAD_STATUS } from "../domain/load.js";
-import { createBooking } from "../domain/booking.js";
 import { NOTIFICATION_TYPE } from "../domain/notification.js";
 import { notifyUsers, allTransporterUserIds } from "../services/notifications.js";
 import { ensureLoadRoute, requireRoadDistance, ROAD_DISTANCE_REQUIRED } from "../services/loadRoute.js";
 import { viewLoadFor, viewLoadsFor } from "../services/loadView.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { createOffer, listOffersForLoad, acceptLoadAtPostedPrice } from "../services/offers.js";
+import { runOffer, sendOfferResult } from "./offers.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -102,41 +103,29 @@ router.get("/:loadId", asyncHandler(async (req, res) => {
 }));
 
 /**
- * POST /api/loads/:loadId/accept — "this transporter has accepted this
- * load." Creates a Booking; does NOT touch truck/driver (see
- * bookings.js's /assign) and does NOT create a Trip (see /create-trip).
- *
- * Phase 4M — the `load.status !== OPEN` check above is a fast application-
- * level rejection, not the real guard against two transporters accepting
- * the same load at the same instant (the same check-then-act race pattern
- * as 4K's release endpoint). The real guard is `bookings.loadId UNIQUE`
- * (db/schema.js) — the database rejects the second concurrent INSERT
- * outright; the route catches that and returns 409.
+ * POST /api/loads/:loadId/accept — the posted-price path: "this transporter
+ * accepts this load at its posted price." Creates a Booking with
+ * agreedAmount = loads.price (source POSTED_PRICE) and closes any PENDING
+ * offers; does NOT touch truck/driver (bookings.js /assign) or create a Trip.
+ * One synchronous transaction (services/offers.js); `bookings.loadId UNIQUE`
+ * remains the backstop for two requests racing for the same load (409).
+ * A load with no posted price cannot be accepted this way (409 NO_POSTED_PRICE).
  */
 router.post("/:loadId/accept", requireRole("fleet_owner"), asyncHandler(async (req, res) => {
-  const [load] = await db.select().from(loads).where(eq(loads.id, req.params.loadId));
-  if (!load) return res.status(404).json({ error: `No load found with id ${req.params.loadId}.` });
-  if (load.status !== LOAD_STATUS.OPEN) {
-    return res.status(409).json({ error: `Load ${load.id} is not open (status: ${load.status}).` });
-  }
+  const r = await runOffer(res, () => acceptLoadAtPostedPrice(req.user, req.params.loadId, req.id));
+  if (r) res.status(r.status).json(r.booking);
+}));
 
-  // 5C-3 — commercial gate: only a stored Google Routes distance satisfies it.
-  const routed = await requireRoadDistance(load);
-  if (!routed) return res.status(ROAD_DISTANCE_REQUIRED.status).json(ROAD_DISTANCE_REQUIRED.body);
+/** POST /api/loads/:loadId/offers — a transporter opens a negotiation thread (Phase 5D-1). */
+router.post("/:loadId/offers", asyncHandler(async (req, res) => {
+  const r = await runOffer(res, () => createOffer(req.user, req.params.loadId, req.body || {}, req.get("Idempotency-Key"), req.id));
+  if (r) sendOfferResult(res, r);
+}));
 
-  const count = (await db.select().from(bookings)).length;
-  const booking = createBooking({ loadId: load.id, transporterId: req.user.id, agreedRoadDistanceMeters: routed.distanceMeters }, count);
-  try {
-    await db.insert(bookings).values(booking);
-  } catch (err) {
-    if (isUniqueConstraintError(err)) {
-      return res.status(409).json({ error: `Load ${load.id} was just accepted by another transporter.` });
-    }
-    throw err;
-  }
-  await db.update(loads).set({ status: LOAD_STATUS.BOOKED, updatedAt: new Date().toISOString() }).where(eq(loads.id, load.id));
-
-  res.status(201).json(booking);
+/** GET /api/loads/:loadId/offers — shipper: all threads on own load; transporter: own thread only; admin: read-only. */
+router.get("/:loadId/offers", asyncHandler(async (req, res) => {
+  const rows = await runOffer(res, () => listOffersForLoad(req.user, req.params.loadId));
+  if (rows) res.json({ offers: rows });
 }));
 
 export default router;

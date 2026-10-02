@@ -101,7 +101,7 @@ async function main() {
   });
 
   await test("Phase 4H/4J: full load -> booking -> assign -> create-trip -> driver operates -> shipper confirms Delivered", async () => {
-    const load = (await api(demoShipper.token, "POST", "/api/loads", { cargo: "Regression pipeline", origin: "Nairobi", destination: "Eldoret", ...NBO_NKU })).json;
+    const load = (await api(demoShipper.token, "POST", "/api/loads", { cargo: "Regression pipeline", origin: "Nairobi", destination: "Eldoret", price: 50000, ...NBO_NKU })).json;
     const booking = (await api(james.token, "POST", `/api/loads/${load.id}/accept`, {})).json;
 
     const trucks = (await api(james.token, "GET", "/api/trucks")).json;

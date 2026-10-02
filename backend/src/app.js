@@ -5,6 +5,7 @@ import { sqlite } from "./db/client.js";
 import authRoutes from "./routes/auth.js";
 import tripRoutes from "./routes/trips.js";
 import loadRoutes from "./routes/loads.js";
+import offerRoutes from "./routes/offers.js";
 import bookingRoutes from "./routes/bookings.js";
 import fleetRoutes from "./routes/fleet.js";
 import paymentRoutes from "./routes/payments.js";
@@ -77,6 +78,7 @@ app.use("/api", darajaWebhookRoutes); // POST /api/payments/callback/stk, POST /
 app.use("/api/auth", authRoutes);
 app.use("/api/trips", tripRoutes);
 app.use("/api/loads", loadRoutes);
+app.use("/api/offers", offerRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api", fleetRoutes); // GET /api/trucks, GET /api/drivers
 app.use("/api/payments", paymentRoutes);

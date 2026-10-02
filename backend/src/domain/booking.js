@@ -22,12 +22,21 @@ export const BOOKING_STATUS = {
   CANCELLED:    "Cancelled",
 };
 
+export const AGREEMENT_SOURCE = {
+  POSTED_PRICE: "POSTED_PRICE",
+  OFFER:        "OFFER",
+};
+
 export function generateBookingId(existingCount) {
   return `BHB-${1000 + existingCount}`;
 }
 
-/** @param {{loadId:string, transporterId:string, agreedRoadDistanceMeters:number}} data */
-export function createBooking({ loadId, transporterId, agreedRoadDistanceMeters }, existingCount) {
+/**
+ * Phase 5D-1 — agreedAmount is snapshotted here, once, and never rewritten
+ * (trigger bookings_agreed_amount_immutable). Phase 5C-3 — agreedRoadDistanceMeters likewise.
+ * @param {{loadId:string, transporterId:string, agreedRoadDistanceMeters:number, agreedAmount:number|null, agreementSource:string, agreedOfferId?:string|null}} data
+ */
+export function createBooking({ loadId, transporterId, agreedRoadDistanceMeters, agreedAmount, agreementSource, agreedOfferId }, existingCount) {
   const now = new Date().toISOString();
   return {
     id:            generateBookingId(existingCount),
@@ -38,6 +47,9 @@ export function createBooking({ loadId, transporterId, agreedRoadDistanceMeters 
     tripId:        null,
     agreedRoadDistanceMeters, // 5C-3 immutable snapshot of loads.distance_meters
     status:        BOOKING_STATUS.ACCEPTED,
+    agreedAmount:    agreedAmount ?? null,
+    agreementSource: agreementSource ?? null,
+    agreedOfferId:   agreedOfferId ?? null,
     createdAt:     now,
     updatedAt:     now,
   };

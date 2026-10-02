@@ -16,6 +16,7 @@
 import "dotenv/config";
 import { app } from "./app.js";
 import { sqlite } from "./db/client.js";
+import { expireDueOffers } from "./services/offers.js";
 
 if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
   console.error(
@@ -28,8 +29,22 @@ if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
 const PORT = process.env.PORT || 4000;
 const server = app.listen(PORT, () => console.log(`Behari Freight backend listening on http://localhost:${PORT}`));
 
+// 5D-1 — lazy expiry already refuses expired offers; the sweeper only records EXPIRED + audit.
+const sweepOffers = () => {
+  try {
+    const n = expireDueOffers();
+    if (n) console.log(`Offer sweeper: expired ${n} offer(s).`);
+  } catch (err) {
+    console.error("Offer sweeper failed:", err?.message);
+  }
+};
+sweepOffers();
+const sweeper = setInterval(sweepOffers, 60_000);
+sweeper.unref();
+
 function shutdown(signal) {
   console.log(`${signal} received: closing server...`);
+  clearInterval(sweeper);
   server.close(() => {
     sqlite.close();
     console.log("Server and database closed.");
