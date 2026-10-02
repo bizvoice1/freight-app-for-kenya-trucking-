@@ -89,8 +89,8 @@ function repairPeterToKbd() {
   db.close();
 }
 
-/** Posts a load (as `shipper`), has James accept+assign(Peter/KBD)+create-trip. Returns {load, booking, trip}. */
-async function createBookedTrip(price, shipperCtx = shipper) {
+/** Posts a load (as `shipper`), has James accept + assign(Peter/KBD). No payment, no trip. Returns {load, booking}. */
+async function createBooked(price, shipperCtx = shipper) {
   repairPeterToKbd();
   const load = (await api(shipperCtx.token, "POST", "/api/loads", {
     cargo: "Test cargo", origin: "Nairobi", destination: "Nakuru", price, ...NBO_NKU,
@@ -98,16 +98,20 @@ async function createBookedTrip(price, shipperCtx = shipper) {
 
   const accept = await api(james.token, "POST", `/api/loads/${load.id}/accept`, {});
   assert(accept.status === 201 || accept.status === 200, `accept failed: ${JSON.stringify(accept.json)}`);
-  const booking = accept.json;
 
-  const assign = await api(james.token, "POST", `/api/bookings/${booking.id}/assign`, { truckId: peterTruckId, driverId: peterDriverId });
+  const assign = await api(james.token, "POST", `/api/bookings/${accept.json.id}/assign`, { truckId: peterTruckId, driverId: peterDriverId });
   assert(assign.status === 200, `assign failed: ${JSON.stringify(assign.json)}`);
+  return { load, booking: assign.json };
+}
 
+/** 5D-4: a trip needs a funded booking, so this pays (success) first. Returns {load, booking, trip, paid}. */
+async function createBookedTrip(price, shipperCtx = shipper) {
+  const { load, booking } = await createBooked(price, shipperCtx);
+  const paid = await payAndWaitPaid(booking.id, price, {}, shipperCtx);
+  assert(paid.status === "Paid", `funding failed: ${paid.status}`);
   const createTrip = await api(james.token, "POST", `/api/bookings/${booking.id}/create-trip`, {});
   assert(createTrip.status === 201, `create-trip failed: ${JSON.stringify(createTrip.json)}`);
-  const trip = createTrip.json;
-
-  return { load, booking: assign.json, trip };
+  return { load, booking, trip: createTrip.json, paid };
 }
 
 /** Frees the truck+driver back up (mirrors a transporter cancelling instead of driving the trip). */
@@ -144,8 +148,6 @@ async function payAndWaitPaid(bookingId, price, opts = {}, shipperCtx = shipper)
 /** Full pipeline: booking -> paid -> delivered -> escrow at ReleasePending. Returns {booking, escrow, load}. */
 async function fundedAndDelivered(price) {
   const { load, booking, trip } = await createBookedTrip(price);
-  const paid = await payAndWaitPaid(booking.id, price);
-  assert(paid.status === "Paid", `expected Paid, got ${paid.status}`);
   await driveToDelivered(trip.id);
   const escrow = await waitFor(async () => {
     const rows = (await api(admin.token, "GET", `/api/escrows?bookingId=${booking.id}`)).json;
@@ -177,22 +179,20 @@ async function main() {
 
   // ── STK callback failures ──────────────────────────────────────────────
   await test("STK ResultCode 1032 (cancelled by user) -> Payment Failed-equivalent, no escrow", async () => {
-    const { load, booking, trip } = await createBookedTrip(9000);
+    const { load, booking } = await createBooked(9000);
     const paid = await payAndWaitPaid(booking.id, 9000, { testOutcome: "cancelled_by_user" });
     assert(paid.status === "Cancelled", `expected Cancelled, got ${paid.status}`);
     const escrows = (await api(admin.token, "GET", `/api/escrows?bookingId=${booking.id}`)).json;
     assert(escrows.length === 0, "no escrow should exist for a cancelled payment");
-    await cancelTrip(trip.id);
   });
 
   await test("Duplicate STK callback for an already-Paid CheckoutRequestID -> ignored, no double-credit", async () => {
-    const { load, booking, trip } = await createBookedTrip(8000);
+    const { load, booking } = await createBooked(8000);
     const paid = await payAndWaitPaid(booking.id, 8000, { testOutcome: "duplicate_callback" });
     assert(paid.status === "Paid", `expected Paid, got ${paid.status}`);
     await sleep(400); // let the simulator's second, duplicate callback land
     const escrows = (await api(admin.token, "GET", `/api/escrows?bookingId=${booking.id}`)).json;
     assert(escrows.length === 1, `expected exactly one escrow, got ${escrows.length}`);
-    await cancelTrip(trip.id);
   });
 
   await test("STK callback for an unrecognised CheckoutRequestID -> reconciliation flag, zero state change", async () => {
@@ -213,7 +213,7 @@ async function main() {
   });
 
   await test("STK callback amount != payments.amount -> reconciliation flag, Payment NOT marked Paid", async () => {
-    const { load, booking, trip } = await createBookedTrip(7000);
+    const { load, booking } = await createBooked(7000);
     const initiate = await api(shipper.token, "POST", `/api/bookings/${booking.id}/payment`, {
       phoneNumber: "254700111222", testOutcome: "wrong_amount",
     });
@@ -225,7 +225,6 @@ async function main() {
     const flag = db.prepare("SELECT * FROM reconciliation_flags WHERE type = 'amount_mismatch' AND related_entity_id = ? ").get(payment.id);
     db.close();
     assert(flag, "expected an amount_mismatch reconciliation flag");
-    await cancelTrip(trip.id);
   });
 
   await test("Shipper calls POST /escrows/:id/release directly -> 403 (admin-only)", async () => {
@@ -243,11 +242,10 @@ async function main() {
     assert(r.status === 403, `expected 403, got ${r.status}`);
   });
 
-  await test("Trip reaches Delivered while Escrow does not yet exist (payment never completed) -> not eligible, no escrow row", async () => {
-    const { load, booking, trip } = await createBookedTrip(5000);
-    // no payment initiated at all
-    await driveToDelivered(trip.id);
-    await sleep(200);
+  await test("5D-4 funding gate: create-trip on an unfunded booking -> 409 PAYMENT_REQUIRED, no trip, no escrow", async () => {
+    const { booking } = await createBooked(5000);
+    const ct = await api(james.token, "POST", `/api/bookings/${booking.id}/create-trip`, {});
+    assert(ct.status === 409 && ct.json.code === "PAYMENT_REQUIRED", `expected 409 PAYMENT_REQUIRED, got ${ct.status} ${JSON.stringify(ct.json)}`);
     const escrows = (await api(admin.token, "GET", `/api/escrows?bookingId=${booking.id}`)).json;
     assert(escrows.length === 0, "no escrow should have been created");
   });
@@ -355,12 +353,11 @@ async function main() {
 
   await test("STK callback reports an MpesaReceiptNumber already used on a different payment -> reconciliation flag, not marked Paid", async () => {
     const first = await createBookedTrip(2100);
-    const firstPaid = await payAndWaitPaid(first.booking.id, 2100);
-    assert(firstPaid.status === "Paid", "setup: first payment should have succeeded");
+    const firstPaid = first.paid;
     const reusedReceipt = firstPaid.mpesaReceiptNumber;
     await cancelTrip(first.trip.id);
 
-    const second = await createBookedTrip(2200);
+    const second = await createBooked(2200);
     const initiate = await api(shipper.token, "POST", `/api/bookings/${second.booking.id}/payment`, {
       phoneNumber: "254700111222", testForceReceipt: reusedReceipt,
     });
@@ -372,11 +369,10 @@ async function main() {
     const flag = db.prepare("SELECT * FROM reconciliation_flags WHERE type = 'duplicate_receipt_number' AND related_entity_id = ?").get(secondPayment.id);
     db.close();
     assert(flag, "expected a duplicate_receipt_number reconciliation flag");
-    await cancelTrip(second.trip.id);
   });
 
   await test("STK callback arrives successfully after a long delay (delayed_callback) -> processed as a normal success", async () => {
-    const { load, booking, trip } = await createBookedTrip(1900);
+    const { load, booking } = await createBooked(1900);
     const initiate = await api(shipper.token, "POST", `/api/bookings/${booking.id}/payment`, {
       phoneNumber: "254700111222", testOutcome: "delayed_callback", testDelayMs: 1500,
     });
@@ -388,13 +384,10 @@ async function main() {
       return p.status !== "StkSent" ? p : null;
     }, { timeoutMs: 5000 });
     assert(paid.status === "Paid", `expected Paid after the delay, got ${paid.status}`);
-    await cancelTrip(trip.id);
   });
 
   await test("Held escrow's original payment reversed before any release (PAYMENT_REVERSED, admin-triggered) -> terminal, not retryable", async () => {
     const { load, booking, trip } = await createBookedTrip(1700);
-    const paid = await payAndWaitPaid(booking.id, 1700);
-    assert(paid.status === "Paid", "setup: payment should have succeeded");
     const [escrow] = (await api(admin.token, "GET", `/api/escrows?bookingId=${booking.id}`)).json;
     assert(escrow.status === "Held", "setup: escrow should be Held");
 

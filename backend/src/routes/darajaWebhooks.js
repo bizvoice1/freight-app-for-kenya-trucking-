@@ -57,9 +57,28 @@ router.post("/payments/callback/stk", asyncHandler(async (req, res) => {
     await flagReconciliation("unknown_checkout_request_id", "payment", null, req.body);
     return res.status(200).json(ACK);
   }
-  if (payment.status !== PAYMENT_STATUS.STK_SENT) {
+  const lateAfterTimeout = payment.status === PAYMENT_STATUS.TIMEOUT;
+  if (payment.status !== PAYMENT_STATUS.STK_SENT && !lateAfterTimeout) {
     await logPaymentEvent("payment", payment.id, "duplicate_callback_ignored", payment.status, payment.status, req.body, req.id);
     return res.status(200).json(ACK);
+  }
+  if (lateAfterTimeout) {
+    // 5D-4: a callback after the attempt timed out. Only a verifiably successful INITIAL payment may still fund
+    // the booking, and only if nothing else has — otherwise it is flagged for a human and never double-funds.
+    if (cb.ResultCode !== 0) {
+      await logPaymentEvent("payment", payment.id, "late_failure_callback_ignored", payment.status, payment.status, req.body, req.id);
+      return res.status(200).json(ACK);
+    }
+    if (payment.purpose !== "INITIAL") {
+      await flagReconciliation("late_adjustment_payment_after_timeout", "payment", payment.id, req.body);
+      return res.status(200).json(ACK);
+    }
+    const [funded] = await db.select().from(escrows).where(eq(escrows.bookingId, payment.bookingId));
+    const [otherPaid] = await db.select().from(payments).where(and(eq(payments.bookingId, payment.bookingId), eq(payments.status, PAYMENT_STATUS.PAID), ne(payments.id, payment.id)));
+    if (funded || otherPaid) {
+      await flagReconciliation("late_success_already_funded", "payment", payment.id, req.body);
+      return res.status(200).json(ACK);
+    }
   }
 
   const now = new Date().toISOString();
@@ -139,11 +158,11 @@ router.post("/payments/callback/stk", asyncHandler(async (req, res) => {
       throw err;
     }
 
-    await logPaymentEvent("payment", payment.id, "callback_received", PAYMENT_STATUS.STK_SENT, PAYMENT_STATUS.PAID, req.body, req.id);
+    await logPaymentEvent("payment", payment.id, lateAfterTimeout ? "late_callback_reconciled" : "callback_received", payment.status, PAYMENT_STATUS.PAID, req.body, req.id);
     await logPaymentEvent("escrow", escrow.id, "status_changed", null, ESCROW_STATUS.HELD, { paymentId: payment.id }, req.id);
 
     await notifyUser(payment.shipperId, NOTIFICATION_TYPE.PAYMENT_CONFIRMED,
-      "Payment confirmed", `Your payment of ${payment.amount} for booking ${payment.bookingId} was received.`,
+      "Payment confirmed", `Your payment of KSh ${Number(payment.amount).toLocaleString("en-US")} for booking ${payment.bookingId} was received.`,
       "payment", payment.id);
     const [booking] = await db.select().from(bookings).where(eq(bookings.id, payment.bookingId));
     if (booking) {

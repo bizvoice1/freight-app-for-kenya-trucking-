@@ -92,11 +92,11 @@ async function booked({ price = 100000, agreed = price, fund = true } = {}) {
   assert(booking.agreedAmount === agreed, `agreedAmount ${booking.agreedAmount} != ${agreed}`);
   const asg = await api(james.token, "POST", `/api/bookings/${booking.id}/assign`, { truckId, driverId });
   assert(asg.status === 200, `assign failed ${JSON.stringify(asg.json)}`);
+  if (!fund) return { load, booking: asg.json, trip: null }; // 5D-4: no trip without funding
+  await pay(booking.id);
   const ct = await api(james.token, "POST", `/api/bookings/${booking.id}/create-trip`, {});
   assert(ct.status === 201, `create-trip failed ${JSON.stringify(ct.json)}`);
-  const ctx = { load, booking: asg.json, trip: ct.json };
-  if (fund) await pay(booking.id);
-  return ctx;
+  return { load, booking: asg.json, trip: ct.json };
 }
 async function pay(bookingId, opts = {}) {
   const r = await api(shipper.token, "POST", `/api/bookings/${bookingId}/payment`, { phoneNumber: "254700111222", ...opts });

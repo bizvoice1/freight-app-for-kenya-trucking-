@@ -66,15 +66,23 @@ async function setup() {
   peterDriverId = drivers.find(d => d.name === "Peter Otieno").id;
 }
 
-async function createBookedTrip(price) {
+async function createBooked(price) {
   repairPeterToKbd(peterTruckId, peterDriverId);
   const load = (await api(shipper.token, "POST", "/api/loads", { cargo: "4L test cargo", origin: "Nairobi", destination: "Nakuru", price, ...NBO_NKU })).json;
   const booking = (await api(james.token, "POST", `/api/loads/${load.id}/accept`, {})).json;
   const assign = await api(james.token, "POST", `/api/bookings/${booking.id}/assign`, { truckId: peterTruckId, driverId: peterDriverId });
   assert(assign.status === 200, `assign failed: ${JSON.stringify(assign.json)}`);
+  return { load, booking: assign.json };
+}
+
+/** 5D-4: a trip needs a funded booking, so this pays (success) first. */
+async function createBookedTrip(price) {
+  const { load, booking } = await createBooked(price);
+  const paid = await payAndWaitPaid(booking.id, price);
+  assert(paid.status === "Paid", `funding failed: ${paid.status}`);
   const createTrip = await api(james.token, "POST", `/api/bookings/${booking.id}/create-trip`, {});
   assert(createTrip.status === 201, `create-trip failed: ${JSON.stringify(createTrip.json)}`);
-  return { load, booking: assign.json, trip: createTrip.json };
+  return { load, booking, trip: createTrip.json, paid };
 }
 
 async function driveToDelivered(tripId) {
@@ -114,9 +122,7 @@ async function main() {
   });
 
   await test("Payment confirmed -> shipper notified; escrow held -> transporter notified", async () => {
-    const { booking, trip } = await createBookedTrip(5000);
-    const paid = await payAndWaitPaid(booking.id, 5000);
-    assert(paid.status === "Paid", "setup: payment should have succeeded");
+    const { booking, trip, paid } = await createBookedTrip(5000);
     await sleep(150);
     const shipperNotifs = await notificationsFor(shipper.token, { type: "payment_confirmed" });
     assert(shipperNotifs.some(n => n.relatedEntityId === paid.id), "shipper should be notified of payment_confirmed");
@@ -126,19 +132,16 @@ async function main() {
   });
 
   await test("Payment failed (cancelled) -> shipper notified, not the transporter", async () => {
-    const { booking, trip } = await createBookedTrip(5100);
+    const { booking } = await createBooked(5100);
     const paid = await payAndWaitPaid(booking.id, 5100, { testOutcome: "cancelled_by_user" });
     assert(paid.status === "Cancelled", "setup: payment should have been cancelled");
     await sleep(150);
     const shipperNotifs = await notificationsFor(shipper.token, { type: "payment_failed" });
     assert(shipperNotifs.some(n => n.relatedEntityId === paid.id), "shipper should be notified of payment_failed");
-    await api(james.token, "POST", `/api/trips/${trip.id}/status`, { status: "Cancelled" }); // free the truck for later tests
   });
 
   await test("Trip status changes -> shipper AND transporter notified at every step", async () => {
     const { booking, trip } = await createBookedTrip(5200);
-    const paid = await payAndWaitPaid(booking.id, 5200);
-    assert(paid.status === "Paid", "setup: payment should have succeeded");
     await driveToDelivered(trip.id);
     const shipperTripNotifs = await notificationsFor(shipper.token, { type: "trip_status" });
     const jamesTripNotifs = await notificationsFor(james.token, { type: "trip_status" });
@@ -168,8 +171,6 @@ async function main() {
 
   await test("Payout failed -> transporter AND admin both notified (admin needs to act)", async () => {
     const { booking, trip } = await createBookedTrip(5300);
-    const paid = await payAndWaitPaid(booking.id, 5300);
-    assert(paid.status === "Paid", "setup: payment should have succeeded");
     await driveToDelivered(trip.id);
     const [escrow] = await waitFor(async () => {
       const rows = (await api(admin.token, "GET", `/api/escrows?bookingId=${booking.id}`)).json;

@@ -19,6 +19,7 @@ import { BOOKING_STATUS } from "../domain/booking.js";
 import { createTrip as buildTrip, ACTIVE_TRIP_STATUSES } from "../../../src/models/trip.js";
 import { createPayment, NON_TERMINAL_PAYMENT_STATUSES } from "../domain/payment.js";
 import { logPaymentEvent } from "../services/ledger.js";
+import { withPaymentSummaries, isBookingFunded, isCanonicalKenyanMobile, expireStalePayments, notifyExpired } from "../services/bookingPayment.js";
 import { stkPush, callbackUrl } from "../services/daraja.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ROAD_DISTANCE_REQUIRED } from "../services/loadRoute.js";
@@ -79,7 +80,7 @@ router.get("/", asyncHandler(async (req, res) => {
     rows = [];
   }
 
-  res.json(rows);
+  res.json(await withPaymentSummaries(rows));
 }));
 
 router.get("/:bookingId", asyncHandler(async (req, res) => {
@@ -88,7 +89,7 @@ router.get("/:bookingId", asyncHandler(async (req, res) => {
   if (!(await canViewBooking(req, booking))) {
     return res.status(403).json({ error: "You are not authorized to view this booking." });
   }
-  res.json(booking);
+  res.json((await withPaymentSummaries([booking]))[0]);
 }));
 
 /**
@@ -159,6 +160,10 @@ router.post("/:bookingId/create-trip", requireRole("fleet_owner"), asyncHandler(
     return res.status(409).json({ error: `${driver.name} is no longer assigned to truck ${truck.plate}. Re-assign before creating the trip.` });
   }
 
+  if (!(await isBookingFunded(booking.id))) {
+    return res.status(409).json({ error: `Booking ${booking.id} is not funded. The shipper must fund it (escrow held) before the trip can be created.`, code: "PAYMENT_REQUIRED" });
+  }
+
   const existingTrips = await db.select().from(trips);
   const hasActive = (field, value) => existingTrips.some(t => t[field] === value && ACTIVE_TRIP_STATUSES.has(t.status));
   if (hasActive("truckId", truck.id))        return res.status(409).json({ error: `Truck ${truck.plate} already has an active trip.` });
@@ -220,6 +225,12 @@ router.post("/:bookingId/payment", requireRole("shipper"), asyncHandler(async (r
 
   const { phoneNumber, testOutcome, testForceReceipt, testDelayMs } = req.body || {};
   if (!phoneNumber) return res.status(400).json({ error: "phoneNumber is required." });
+  if (!isCanonicalKenyanMobile(phoneNumber)) {
+    return res.status(400).json({ error: "phoneNumber must be a Kenyan mobile number in the form 2547XXXXXXXX or 2541XXXXXXXX.", code: "INVALID_PHONE" });
+  }
+
+  // A stale in-flight attempt must not block a retry: expire it first (this is a POST, so mutation is fine).
+  await notifyExpired(expireStalePayments({ bookingId: booking.id, requestId: req.id }));
 
   const existingForBooking = await db.select().from(payments).where(eq(payments.bookingId, booking.id));
   if (existingForBooking.some(p => NON_TERMINAL_PAYMENT_STATUSES.has(p.status))) {

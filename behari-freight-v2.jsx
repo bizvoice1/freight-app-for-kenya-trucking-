@@ -2508,7 +2508,7 @@ export default function BehariFreight({
     const ids = new Set(commerce.bookings.map(b => b.id));
     if (seenBookings.current) {
       const fresh = commerce.bookings.filter(b => !seenBookings.current.has(b.id));
-      if (fresh.length) { setDemoToast(`Price agreed: ${ksh(fresh[0].agreedAmount)}. Payment required to secure this booking.`); setTab(2); }
+      if (fresh.length) { setDemoToast(`Price agreed: ${ksh(fresh[0].agreedAmount)}. Awaiting shipper payment.`); setTab(2); }
     }
     seenBookings.current = ids;
   }, [commerce.bookings, commerce.ready]);
@@ -2518,7 +2518,7 @@ export default function BehariFreight({
   }
   function openNotification(n) {
     const offer = commerce.offers.find(o => o.id === n.relatedEntityId);
-    const loadId = offer?.loadId ?? commerce.bookings.find(b => b.id === n.relatedEntityId)?.loadId;
+    const loadId = offer?.loadId ?? commerce.bookings.find(b => b.id === n.relatedEntityId || b.payment?.paymentId === n.relatedEntityId || b.payment?.escrowId === n.relatedEntityId)?.loadId;
     if (loadId && commerce.bookings.some(b => b.loadId === loadId)) { setTab(2); return; }
     if (loadId) { setFocusId(null); setTimeout(() => setFocusId(loadId), 0); setTab(1); }
   }

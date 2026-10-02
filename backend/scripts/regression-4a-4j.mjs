@@ -125,6 +125,15 @@ async function main() {
 
     const assign = await api(james.token, "POST", `/api/bookings/${booking.id}/assign`, { truckId: kbd.id, driverId: peterDriver.id });
     assert(assign.status === 200, `assign failed: ${JSON.stringify(assign.json)}`);
+    const gated = await api(james.token, "POST", `/api/bookings/${booking.id}/create-trip`, {});
+    assert(gated.status === 409 && gated.json.code === "PAYMENT_REQUIRED", `unfunded create-trip should be 409 PAYMENT_REQUIRED, got ${gated.status}`);
+    const pay = await api(demoShipper.token, "POST", `/api/bookings/${booking.id}/payment`, { phoneNumber: "254700111222" });
+    assert(pay.status === 201, `payment failed: ${JSON.stringify(pay.json)}`);
+    for (let i = 0; i < 50; i++) {
+      const p = (await api(demoShipper.token, "GET", `/api/payments/${pay.json.id}`)).json;
+      if (p.status === "Paid") break;
+      await new Promise(r => setTimeout(r, 100));
+    }
     const createTrip = await api(james.token, "POST", `/api/bookings/${booking.id}/create-trip`, {});
     assert(createTrip.status === 201, `create-trip failed: ${JSON.stringify(createTrip.json)}`);
     const trip = createTrip.json;

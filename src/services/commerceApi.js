@@ -36,3 +36,7 @@ export const counterOffer = (role, offerId, amount, note) =>
 export const acceptOffer   = (role, offerId) => call(role, "POST", `/api/offers/${encodeURIComponent(offerId)}/accept`, {});
 export const rejectOffer   = (role, offerId, reason) => call(role, "POST", `/api/offers/${encodeURIComponent(offerId)}/reject`, reason ? { reason } : {});
 export const withdrawOffer = (role, offerId) => call(role, "POST", `/api/offers/${encodeURIComponent(offerId)}/withdraw`, {});
+
+/** Starts an M-Pesa STK push for the booking. Only the phone is sent — the backend decides the amount. */
+export const startBookingPayment = (bookingId, phoneNumber) =>
+  call("shipper", "POST", `/api/bookings/${encodeURIComponent(bookingId)}/payment`, { phoneNumber });

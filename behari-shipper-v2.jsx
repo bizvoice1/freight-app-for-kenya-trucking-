@@ -16,7 +16,7 @@ import { CARRIER_RATING_DIMS } from "./src/models/rating.js";
 // Matching engine — shared UI components (Truck ↔ Cargo)
 import { useCommerce } from "./src/hooks/useCommerce.js";
 import { OfferThread, AgreedPriceBlock, CommerceBell, DemoBadge } from "./src/components/negotiation/negotiation.jsx";
-import { ksh } from "./src/models/backendLoad.js";
+import { ksh, paymentView } from "./src/models/backendLoad.js";
 import MatchCard from "./src/components/matching/MatchCard.jsx";
 import NearbyList from "./src/components/matching/NearbyList.jsx";
 // Phase 4G — real backend GPS (Phase 4F), distinct from the simulated map
@@ -810,7 +810,7 @@ function ShipperCommercePanel({ s, commerce }) {
   if (booking) return (
     <div style={{ marginBottom:16 }}>
       <div style={{ fontSize:11,fontWeight:700,color:C.muted,letterSpacing:0.8,textTransform:"uppercase",marginBottom:8 }}>Booking</div>
-      <AgreedPriceBlock booking={booking} load={{ price:s.pay }} />
+      <AgreedPriceBlock booking={booking} load={{ price:s.pay }} viewer="shipper" onFund={A.fundBooking} />
     </div>
   );
   return (
@@ -927,7 +927,7 @@ function DetailModal({ s, commerce, onClose, onConfirmDelivery = ()=>{}, escrowD
 
         {/* Details */}
         <div style={{ background:C.bg,borderRadius:12,overflow:"hidden",marginBottom:16 }}>
-          {[["Driver",s.driver],["Truck",`${s.truck} · ${s.plate}`],["Distance",distLabel(s).text],["Payment",`KSh ${s.pay.toLocaleString()}`]].map(([k,v],i,a)=>(
+          {[["Driver",s.driver],["Truck",`${s.truck} · ${s.plate}`],["Distance",distLabel(s).text],["Payment",`KSh ${(s.agreedAmount ?? s.pay).toLocaleString()}`]].map(([k,v],i,a)=>(
             <div key={k} style={{ display:"flex",justifyContent:"space-between",padding:"12px 16px",borderBottom:i<a.length-1?`1px solid ${C.border}`:"none" }}>
               <span style={{ fontSize:13,color:C.secondary }}>{k}</span>
               <span style={{ fontSize:13,fontWeight:700,color:C.black }}>{v}</span>
@@ -2041,11 +2041,11 @@ export default function BehariShipper({ onPostLoad = ()=>{}, postedLoads = [], n
       id:v.id, backendLoadId:v.id, isBackend:true, isDemo:false, status,
       cargo:v.cargo, from:v.origin, to:v.destination, route:`${v.origin} → ${v.destination}`,
       weight:v.weight ?? "—", truck:v.truckType || "Any Available",
-      pay:v.price ?? 0, dist:road ? metersToKm(v.distanceMeters) : 0, distSource:road ? "route" : "unresolved",
+      pay:v.price ?? 0, agreedAmount: booking?.agreedAmount ?? null, dist:road ? metersToKm(v.distanceMeters) : 0, distSource:road ? "route" : "unresolved",
       pickD:v.pickupDate || "TBD", eta:"TBD", truckCount:1,
       progress:status === "Escrow Held" ? 10 : 25,
       driver: booking ? "Transporter booked" : "Matching transporter…", plate:"—",
-      ping: booking ? "Price agreed · payment required" : "Awaiting offers",
+      ping: booking ? `Price agreed · ${paymentView(booking.payment).label}` : "Awaiting offers",
       createdAt: v.createdAt ? Date.parse(v.createdAt) : 0,
     };
   }).sort((a,b) => b.createdAt - a.createdAt);
@@ -2053,7 +2053,7 @@ export default function BehariShipper({ onPostLoad = ()=>{}, postedLoads = [], n
 
   function openNotification(n) {
     const offer = commerce.offers.find(o => o.id === n.relatedEntityId);
-    const loadId = offer?.loadId ?? commerce.bookings.find(b => b.id === n.relatedEntityId)?.loadId;
+    const loadId = offer?.loadId ?? commerce.bookings.find(b => b.id === n.relatedEntityId || b.payment?.paymentId === n.relatedEntityId || b.payment?.escrowId === n.relatedEntityId)?.loadId;
     const target = allShipments.find(x => x.id === loadId);
     if (target) setDetail(target);
   }

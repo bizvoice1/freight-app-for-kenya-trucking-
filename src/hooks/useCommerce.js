@@ -76,6 +76,7 @@ export function useCommerce(role) {
       accept: wrap((id) => api.acceptOffer(role, id)),
       reject: wrap((id, reason) => api.rejectOffer(role, id, reason)),
       withdraw: wrap((id) => api.withdrawOffer(role, id)),
+      fundBooking: wrap((bookingId, phone) => api.startBookingPayment(bookingId, phone)),
     },
   };
 }

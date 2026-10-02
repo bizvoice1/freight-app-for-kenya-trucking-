@@ -8,6 +8,21 @@ attack/abuse suite (4M) — the last engineering phase before 4N, a real
 pilot with real money. All server-identity-checked, all in one SQLite
 (dev)/Postgres-ready database.
 
+## Booking funding (Phase 5D-4)
+
+The shipper funds an agreed booking through the existing 4K engine (`POST /api/bookings/:id/payment` → STK → callback → Payment Paid → Escrow HELD). No new payment system.
+
+- The amount is always `booking.agreedAmount`; a body `amount` is ignored. The phone must be canonical `254[17]XXXXXXXX` (the frontend normalizes 07xx/+254/254; the backend validates, `INVALID_PHONE`).
+- `GET /api/bookings[/:id]` carries a derived `payment` summary (`status, paymentId, amount, paidAt, escrowStatus, escrowId`) with no phone. Payment and escrow statuses stay separate.
+- Funding gate: assignment may precede payment, but `create-trip` returns 409 `PAYMENT_REQUIRED` until the booking's escrow is HELD.
+- Expiry: `StkSent -> Timeout` after `PAYMENT_STK_TIMEOUT_SECONDS` (default 120), by a sweeper (`PAYMENT_SWEEP_INTERVAL_SECONDS`, default 15) and lazily before a retry. GETs never mutate. A late success callback after Timeout is reconciled only if the amount matches and nothing else funded the booking; otherwise it is flagged (`late_success_already_funded`) and never double-funds.
+- Privacy: fleet_owner payment reads omit `phoneNumber` and Daraja request ids.
+- Production guard: `NODE_ENV=production` refuses to start unless `DARAJA_ENV` is set to a non-simulate value. The frontend never sends `testOutcome` / `testForceReceipt` / `testDelayMs`.
+
+### PRE-LIVE BLOCKER (5N) — Daraja callback hardening, NOT done in 5D-4
+
+Real-money Daraja must NOT be enabled for a production pilot until the callback trust and reconciliation controls are reviewed: callback source authentication/allow-listing, a signed or secret-bearing callback URL, replay protection beyond receipt de-duplication, and a periodic reconciliation against Daraja transaction-status queries for payments stuck in StkSent/Timeout.
+
 ## Hardening + the attack suite (Phase 4M)
 
 4M's brief, stated plainly: **take the existing system and deliberately try

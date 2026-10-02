@@ -91,6 +91,16 @@ async function postOpenLoad(price = 1000) {
   return (await api(shipper.token, "POST", "/api/loads", { cargo: "Attack test cargo", origin: "Nairobi", destination: "Nakuru", price, ...NBO_NKU })).json;
 }
 
+/** 5D-4: trips need a funded booking — pay via the real payment path and wait for escrow HELD. */
+async function fundBooking(bookingId) {
+  const pay = await api(shipper.token, "POST", `/api/bookings/${bookingId}/payment`, { phoneNumber: "254700111222" });
+  assert(pay.status === 201, `fund: payment initiate failed: ${JSON.stringify(pay.json)}`);
+  await waitFor(async () => {
+    const p = (await api(shipper.token, "GET", `/api/payments/${pay.json.id}`)).json;
+    return p.status === "Paid" ? p : null;
+  });
+}
+
 async function cancelTrip(tripId) {
   await api(james.token, "POST", `/api/trips/${tripId}/status`, { status: "Cancelled" });
 }
@@ -163,6 +173,7 @@ async function main() {
     const r = await api(shipper.token, "POST", `/api/bookings/${accept.json.id}/payment`, { phoneNumber: null });
     assert(r.status === 400, `expected 400, got ${r.status}`);
     await api(james.token, "POST", `/api/bookings/${accept.json.id}/assign`, { truckId: peterTruckId, driverId: peterDriverId });
+    await fundBooking(accept.json.id);
     const trip = await api(james.token, "POST", `/api/bookings/${accept.json.id}/create-trip`, {});
     await cancelTrip(trip.json.id);
   });
@@ -228,6 +239,7 @@ async function main() {
     const load = await postOpenLoad(2300);
     const accept = await api(james.token, "POST", `/api/loads/${load.id}/accept`, {});
     await api(james.token, "POST", `/api/bookings/${accept.json.id}/assign`, { truckId: peterTruckId, driverId: peterDriverId });
+    await fundBooking(accept.json.id);
     const [r1, r2] = await Promise.all([
       api(james.token, "POST", `/api/bookings/${accept.json.id}/create-trip`, {}),
       api(james.token, "POST", `/api/bookings/${accept.json.id}/create-trip`, {}),
@@ -265,6 +277,7 @@ async function main() {
     const load = await postOpenLoad(2500);
     const accept = await api(james.token, "POST", `/api/loads/${load.id}/accept`, {});
     await api(james.token, "POST", `/api/bookings/${accept.json.id}/assign`, { truckId: peterTruckId, driverId: peterDriverId });
+    await fundBooking(accept.json.id);
     const trip = await api(james.token, "POST", `/api/bookings/${accept.json.id}/create-trip`, {});
     try {
       // admin.token: isolates canTransitionTrip()'s own same-to-same rule —
@@ -284,6 +297,7 @@ async function main() {
     const load = await postOpenLoad(2600);
     const accept = await api(james.token, "POST", `/api/loads/${load.id}/accept`, {});
     await api(james.token, "POST", `/api/bookings/${accept.json.id}/assign`, { truckId: peterTruckId, driverId: peterDriverId });
+    await fundBooking(accept.json.id);
     const trip = await api(james.token, "POST", `/api/bookings/${accept.json.id}/create-trip`, {});
     assert(trip.json?.id, `setup: create-trip failed: ${JSON.stringify(trip.json)}`);
     try {
@@ -303,6 +317,7 @@ async function main() {
     const load = await postOpenLoad(2700);
     const accept = await api(james.token, "POST", `/api/loads/${load.id}/accept`, {});
     await api(james.token, "POST", `/api/bookings/${accept.json.id}/assign`, { truckId: peterTruckId, driverId: peterDriverId });
+    await fundBooking(accept.json.id);
     const trip = await api(james.token, "POST", `/api/bookings/${accept.json.id}/create-trip`, {});
     assert(trip.json?.id, `setup: create-trip failed: ${JSON.stringify(trip.json)}`);
     try {
@@ -327,6 +342,7 @@ async function main() {
     assert(assignByDaniel.status === 403, `expected 403, got ${assignByDaniel.status}`);
 
     await api(james.token, "POST", `/api/bookings/${accept.json.id}/assign`, { truckId: peterTruckId, driverId: peterDriverId });
+    await fundBooking(accept.json.id);
     const trip = await api(james.token, "POST", `/api/bookings/${accept.json.id}/create-trip`, {});
     assert(trip.json?.id, `setup: create-trip failed: ${JSON.stringify(trip.json)}`);
     try {

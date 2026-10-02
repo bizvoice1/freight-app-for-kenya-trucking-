@@ -17,12 +17,19 @@ import "dotenv/config";
 import { app } from "./app.js";
 import { sqlite } from "./db/client.js";
 import { expireDueOffers } from "./services/offers.js";
+import { expireStalePayments, notifyExpired, paymentConfigProblem } from "./services/bookingPayment.js";
 
 if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
   console.error(
     "FATAL: NODE_ENV=production but JWT_SECRET is not set. Refusing to start " +
     "with the hardcoded development secret in production. Set JWT_SECRET and retry."
   );
+  process.exit(1);
+}
+
+const payProblem = paymentConfigProblem();
+if (payProblem) {
+  console.error(`FATAL: ${payProblem}`);
   process.exit(1);
 }
 
@@ -42,9 +49,25 @@ sweepOffers();
 const sweeper = setInterval(sweepOffers, 60_000);
 sweeper.unref();
 
+// 5D-4 — StkSent -> Timeout after PAYMENT_STK_TIMEOUT_SECONDS; GET endpoints never mutate.
+const sweepPayments = async () => {
+  try {
+    const expired = expireStalePayments();
+    if (expired.length) {
+      console.log(`Payment sweeper: timed out ${expired.length} payment(s).`);
+      await notifyExpired(expired);
+    }
+  } catch (err) {
+    console.error("Payment sweeper failed:", err?.message);
+  }
+};
+const paySweeper = setInterval(sweepPayments, Math.max(1, Number(process.env.PAYMENT_SWEEP_INTERVAL_SECONDS) || 15) * 1000);
+paySweeper.unref();
+
 function shutdown(signal) {
   console.log(`${signal} received: closing server...`);
   clearInterval(sweeper);
+  clearInterval(paySweeper);
   server.close(() => {
     sqlite.close();
     console.log("Server and database closed.");

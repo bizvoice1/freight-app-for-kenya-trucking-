@@ -33,13 +33,20 @@ async function canViewPayment(req, payment) {
   return false;
 }
 
+/** The transporter never sees the shipper's phone number or Daraja correlation ids. */
+function redactFor(user, payment) {
+  if (user.role !== "fleet_owner") return payment;
+  const { phoneNumber, merchantRequestId, checkoutRequestId, ...safe } = payment;
+  return safe;
+}
+
 router.get("/:id", asyncHandler(async (req, res) => {
   const [payment] = await db.select().from(payments).where(eq(payments.id, req.params.id));
   if (!payment) return res.status(404).json({ error: `No payment found with id ${req.params.id}.` });
   if (!(await canViewPayment(req, payment))) {
     return res.status(403).json({ error: "You are not authorized to view this payment." });
   }
-  res.json(payment);
+  res.json(redactFor(req.user, payment));
 }));
 
 router.get("/", asyncHandler(async (req, res) => {
@@ -57,7 +64,7 @@ router.get("/", asyncHandler(async (req, res) => {
   } else if (req.user.role === "driver") {
     rows = [];
   }
-  res.json(rows);
+  res.json(rows.map(p => redactFor(req.user, p)));
 }));
 
 export default router;

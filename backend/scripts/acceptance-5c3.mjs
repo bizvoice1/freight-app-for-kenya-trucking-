@@ -112,7 +112,7 @@ async function main() {
     const acc = await A.api(james.token, "POST", `/api/loads/${roadLoad.id}/accept`, {});
     assert(acc.status === 201, `expected 201, got ${acc.status} ${acc.text}`);
     assert(acc.json.agreedRoadDistanceMeters === roadLoad.distanceMeters, "snapshot must equal canonical meters");
-    const pay = await A.api(shipper.token, "POST", `/api/bookings/${acc.json.id}/payment`, { phoneNumber: "0700000001" });
+    const pay = await A.api(shipper.token, "POST", `/api/bookings/${acc.json.id}/payment`, { phoneNumber: "254700000001" });
     assert(pay.json?.code !== "ROAD_DISTANCE_REQUIRED" && pay.status < 300, `payment blocked: ${pay.status} ${pay.text}`);
   });
   await test("R2: an estimate-only load (no stored road distance) is blocked at accept, and stays Open", async () => {
@@ -127,7 +127,7 @@ async function main() {
     const d = dbA();
     d.prepare("INSERT INTO bookings (id,load_id,transporter_id,status,created_at,updated_at) VALUES ('BHB-LEGACY',?,?, 'Accepted', datetime('now'), datetime('now'))").run(load.id, james.user?.id || "USR-1004");
     d.close();
-    const pay = await A.api(shipper.token, "POST", "/api/bookings/BHB-LEGACY/payment", { phoneNumber: "0700000001" });
+    const pay = await A.api(shipper.token, "POST", "/api/bookings/BHB-LEGACY/payment", { phoneNumber: "254700000001" });
     assert(pay.status === 409 && pay.json.code === "ROAD_DISTANCE_REQUIRED", `expected 409 ROAD_DISTANCE_REQUIRED, got ${pay.status} ${pay.text}`);
   });
 

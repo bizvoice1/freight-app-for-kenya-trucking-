@@ -5,7 +5,7 @@
  * portals. Plain props only: every amount shown comes from backend records.
  */
 import { useState } from "react";
-import { ksh, agreedRatePerKm } from "../../models/backendLoad.js";
+import { ksh, agreedRatePerKm, normalizeKenyanPhone, paymentView } from "../../models/backendLoad.js";
 import { metersToKm } from "../../models/geo.js";
 
 const P = {
@@ -122,7 +122,7 @@ export function OfferThread({ thread, partyLabel, onAccept, onCounter, onReject,
       )}
       {latest.effectiveStatus === "ACCEPTED" && (
         <div style={{ background:P.greenBg, color:P.green, borderRadius:8, padding:"8px 10px", fontSize:12, fontWeight:700, marginTop:6 }}>
-          Price agreed: {ksh(latest.amount)}. Payment required to secure this booking.
+          Price agreed: {ksh(latest.amount)}.
         </div>
       )}
 
@@ -157,7 +157,7 @@ export function OfferThread({ thread, partyLabel, onAccept, onCounter, onReject,
 }
 
 /** Posted vs agreed commercial terms for a booking — all values from the backend booking/load. */
-export function AgreedPriceBlock({ booking, load }) {
+export function AgreedPriceBlock({ booking, load, viewer = "transporter", onFund }) {
   const rate = agreedRatePerKm(booking.agreedAmount, booking.agreedRoadDistanceMeters);
   const rows = [
     ["Posted Price", load?.price ? ksh(load.price) : "—"],
@@ -175,14 +175,66 @@ export function AgreedPriceBlock({ booking, load }) {
           </div>
         ))}
       </div>
-      <div style={{ background:P.amberBg, color:P.amber, borderRadius:8, padding:"9px 12px", fontSize:12, fontWeight:700, marginTop:8 }}>
-        Price agreed: {ksh(booking.agreedAmount)}. Payment required to secure this booking.
-      </div>
+      <BookingPayment booking={booking} viewer={viewer} onFund={onFund} />
     </div>
   );
 }
 
-const NOTIF_ICON = { offer_received:"💬", offer_countered:"↔️", offer_accepted:"✅", offer_rejected:"✖️", booking_confirmed:"📦" };
+/** Funding panel driven only by the backend `booking.payment` summary. viewer: "shipper" | "transporter". */
+export function BookingPayment({ booking, viewer, onFund }) {
+  const [phone, setPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const pay = booking.payment;
+  const v = paymentView(pay);
+  const amount = ksh(booking.agreedAmount);
+  const box = (bg, color, extra) => ({ background:bg, color, borderRadius:8, padding:"9px 12px", fontSize:12, fontWeight:700, marginTop:8, ...extra });
+
+  if (v.key === "funded" || v.key === "paid") {
+    return (
+      <div style={box(P.greenBg, P.green)} data-testid="payment-funded">
+        {viewer === "shipper" ? `${v.label} · ${amount} funded` : `${amount} funded · Escrow held`}
+      </div>
+    );
+  }
+  if (viewer !== "shipper") {
+    return (
+      <div style={box(P.amberBg, P.amber)} data-testid="payment-transporter-wait">
+        {v.key === "awaiting" ? "Awaiting payment — M-Pesa confirmation pending" : "Awaiting shipper payment"}
+      </div>
+    );
+  }
+  if (v.key === "awaiting") {
+    return <div style={box(P.blueBg, P.blue)} data-testid="payment-awaiting">Awaiting M-Pesa confirmation — approve the prompt on your phone.</div>;
+  }
+
+  async function submit() {
+    const n = normalizeKenyanPhone(phone);
+    if (!n) { setError("Enter a valid Kenyan M-Pesa number, e.g. 0712 345 678."); return; }
+    setBusy(true); setError(null);
+    const r = await onFund(booking.id, n);
+    setBusy(false);
+    if (!r.ok) setError(r.error);
+  }
+  return (
+    <div style={{ marginTop:8 }} data-testid="payment-form">
+      <div style={box(v.key === "unsuccessful" ? P.redBg : P.amberBg, v.key === "unsuccessful" ? P.red : P.amber, { marginTop:0 })} data-testid="payment-state">
+        {v.label}{v.key === "unsuccessful" ? " · Retry" : ""}
+      </div>
+      <input type="tel" inputMode="tel" value={phone} onChange={e => { setPhone(e.target.value); setError(null); }} placeholder="M-Pesa number, e.g. 0712 345 678"
+        data-testid="payment-phone"
+        style={{ width:"100%", marginTop:8, padding:"10px 12px", fontSize:14, fontFamily:font, border:`1.5px solid ${P.border}`, borderRadius:8, outline:"none", color:P.black, background:P.white }} />
+      <button disabled={busy || !phone.trim()} onClick={submit} data-testid="fund-booking"
+        style={btn(P.green, P.black, { width:"100%", marginTop:8, opacity: busy || !phone.trim() ? 0.6 : 1 })}>
+        {busy ? "Sending M-Pesa prompt…" : v.key === "unsuccessful" ? `Retry — ${amount}` : `Fund Booking — ${amount}`}
+      </button>
+      <div style={{ fontSize:11, color:P.muted, marginTop:6 }}>The agreed amount will be held in escrow until the applicable release conditions are met.</div>
+      {error && <div style={{ fontSize:12, color:P.red, fontWeight:600, marginTop:6 }} data-testid="payment-error">{error}</div>}
+    </div>
+  );
+}
+
+const NOTIF_ICON = { offer_received:"💬", offer_countered:"↔️", offer_accepted:"✅", offer_rejected:"✖️", booking_confirmed:"📦", payment_confirmed:"💳", payment_failed:"⚠️", escrow_held:"🔒" };
 
 /** Bell + dropdown of backend offer/booking notifications. */
 export function CommerceBell({ notifications, onOpen, onMarkRead }) {

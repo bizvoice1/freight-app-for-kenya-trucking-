@@ -8,6 +8,7 @@ import { metersToKm } from "./geo.js";
 
 export const COMMERCIAL_NOTIFICATION_TYPES = new Set([
   "offer_received", "offer_countered", "offer_accepted", "offer_rejected", "booking_confirmed",
+  "payment_confirmed", "payment_failed", "escrow_held",
 ]);
 
 /** agreedAmount ÷ (agreedRoadDistanceMeters / 1000), whole KSh/km. Null when it cannot be computed. */
@@ -49,4 +50,23 @@ export function groupOfferThreads(offers) {
   }
   for (const list of Object.values(byLoad)) for (const t of list) { t.rows.sort((a, b) => a.round - b.round); t.latest = t.rows[t.rows.length - 1]; }
   return byLoad;
+}
+
+/** Normalizes 07xx / 01xx / +254 / 254 input to canonical 254XXXXXXXXX; null when not a Kenyan mobile. The backend re-validates. */
+export function normalizeKenyanPhone(input) {
+  const d = String(input ?? "").replace(/[\s\-()]/g, "").replace(/^\+/, "");
+  let n = null;
+  if (/^0[17]\d{8}$/.test(d)) n = "254" + d.slice(1);
+  else if (/^254[17]\d{8}$/.test(d)) n = d;
+  return n;
+}
+
+/** Display state for a booking's backend payment summary. The UI keeps no payment state of its own. */
+export function paymentView(payment) {
+  const st = payment?.status ?? "None";
+  if (st === "Paid" && payment.escrowStatus === "Held") return { key: "funded", label: "Payment confirmed · Escrow held" };
+  if (st === "Paid") return { key: "paid", label: "Payment confirmed" };
+  if (st === "StkSent" || st === "Pending") return { key: "awaiting", label: "Awaiting M-Pesa confirmation" };
+  if (["Timeout", "Failed", "Cancelled"].includes(st)) return { key: "unsuccessful", label: "Payment unsuccessful" };
+  return { key: "required", label: "Payment required" };
 }
