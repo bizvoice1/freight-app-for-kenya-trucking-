@@ -25,7 +25,8 @@
     "test:5e2": "node scripts/acceptance-5e2.mjs",
     "test:5p1": "node scripts/acceptance-5p1.mjs",
     "test:5p3": "node scripts/acceptance-5p3.mjs",
-    "test:5e3": "node scripts/acceptance-5e3.mjs"
+    "test:5e3": "node scripts/acceptance-5e3.mjs",
+    "test:5e4a": "node scripts/acceptance-5e4a.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",

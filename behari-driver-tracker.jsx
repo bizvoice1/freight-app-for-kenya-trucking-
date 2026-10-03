@@ -25,6 +25,8 @@ import {
   startDriverTracking,
   stopDriverTracking,
   getTrackingState,
+  getTrip,
+  requestTripStatus,
 } from "./src/services/trackingService.js";
 
 const C = {
@@ -160,6 +162,56 @@ function TripPicker({ driverId, onPick, onSwitchDriver, onExit }) {
   );
 }
 
+/* ── Operational status panel: renders only from the backend trip ── */
+const STAGE_COPY = {
+  "Assigned":   { title: "Assigned", note: "Start the journey when you leave for the pickup site.", action: { label: "DISPATCH / START JOURNEY", next: "Dispatched" } },
+  "Dispatched": { title: "Dispatched", note: "On the way to pickup. Confirm when you reach the site.", action: { label: "ARRIVED AT PICKUP", next: "At Pickup" } },
+  "At Pickup":  { title: "Ready for Gate Verification", note: "Loading requires verification at the pickup site." },
+  "Loading":    { title: "Loading in progress", note: "The loading agent controls the next step." },
+  "In Transit": { title: "In transit", note: "Delivery arrival controls are not available yet." },
+  "At Delivery":{ title: "At delivery", note: "Awaiting delivery confirmation." },
+};
+
+function TripStatusPanel({ trip, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const copy = STAGE_COPY[trip.status];
+
+  async function act(next) {
+    setBusy(true); setError("");
+    const r = await requestTripStatus(trip.id, next);
+    if (r.ok) onChanged(r.trip);
+    else {
+      setError(r.error);
+      const fresh = await getTrip(trip.id);
+      if (fresh) onChanged(fresh);
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div data-testid="trip-status-panel" style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginBottom:16 }}>
+      <div style={{ fontSize:11, color:C.muted, fontWeight:700, letterSpacing:1, marginBottom:6 }}>TRIP STATUS</div>
+      <div data-testid="trip-status" style={{ fontSize:15, fontWeight:800, color:C.green }}>{trip.status}</div>
+      {copy && (
+        <div style={{ marginTop:8 }}>
+          <div style={{ fontSize:14, fontWeight:700 }}>{copy.title}</div>
+          <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>{copy.note}</div>
+        </div>
+      )}
+      {copy?.action && (
+        <button
+          disabled={busy} onClick={() => act(copy.action.next)}
+          style={{ marginTop:12, width:"100%", background:C.green, color:"#00220F", border:"none", borderRadius:10, padding:"14px", fontSize:14, fontWeight:800, fontFamily:font, cursor: busy ? "default" : "pointer", opacity: busy ? 0.7 : 1 }}
+        >
+          {busy ? "Updating…" : copy.action.label}
+        </button>
+      )}
+      {error && <div style={{ background:C.redBg, color:C.red, fontSize:12, borderRadius:8, padding:"10px 12px", marginTop:10 }}>{error}</div>}
+    </div>
+  );
+}
+
 /* ── Step 3: the tracker itself — Ready, then Tracking ── */
 function TrackerScreen({ tripId, driverName, onSwitchTrip, onExit }) {
   const [trip, setTrip]   = useState(null);
@@ -228,6 +280,8 @@ function TrackerScreen({ tripId, driverName, onSwitchTrip, onExit }) {
           <div style={{ fontSize:22, fontWeight:800, marginBottom:2 }}>{truck?.plate || "—"}</div>
           <div style={{ fontSize:14, color:C.muted, marginBottom:24 }}>{trip.pickup} → {trip.delivery}</div>
 
+          <TripStatusPanel trip={trip} onChanged={setTrip} />
+
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginBottom:24 }}>
             <div style={{ fontSize:11, color:C.muted, fontWeight:700, letterSpacing:1, marginBottom:6 }}>GPS</div>
             <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:15, fontWeight:700 }}>
@@ -270,6 +324,8 @@ function TrackerScreen({ tripId, driverName, onSwitchTrip, onExit }) {
               <div style={{ fontSize:17, fontWeight:800, marginTop:4 }}>{loc?.accuracy != null ? `${Math.round(loc.accuracy)} m` : "—"}</div>
             </div>
           </div>
+
+          <TripStatusPanel trip={trip} onChanged={setTrip} />
 
           <div style={{ fontSize:12, color:C.muted, marginBottom:24 }}>
             Updated {ago != null ? `${ago} sec ago` : "—"}

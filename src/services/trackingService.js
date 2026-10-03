@@ -154,3 +154,30 @@ export async function getMyTrips() {
     return [];
   }
 }
+
+/** Canonical trip from the backend (used to render and to refetch after any action). */
+export async function getTrip(tripId) {
+  try {
+    const res = await fetch(`${API_BASE}/api/trips/${encodeURIComponent(tripId)}`, { headers: _authHeaders() });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/** Asks the backend to move the trip to `status`. The backend decides; returns { ok, trip, error, code }. */
+export async function requestTripStatus(tripId, status) {
+  try {
+    const res = await fetch(`${API_BASE}/api/trips/${encodeURIComponent(tripId)}/status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ..._authHeaders() },
+      body: JSON.stringify({ status }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data.error || "Could not update trip status.", code: data.code };
+    return { ok: true, trip: data };
+  } catch {
+    return { ok: false, error: `Could not reach the backend at ${API_BASE}.` };
+  }
+}
