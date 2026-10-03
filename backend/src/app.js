@@ -16,6 +16,7 @@ import notificationRoutes from "./routes/notifications.js";
 import geoRoutes from "./routes/geo.js";
 import adjustmentRoutes from "./routes/adjustments.js";
 import gateRoutes from "./routes/gate.js";
+import { verifyToken } from "./auth/jwt.js";
 
 export const app = express();
 
@@ -76,6 +77,20 @@ app.get("/ready", (_req, res) => {
 // any "/api"-prefixed router with a blanket auth check gets a turn, not
 // merely be defined without requireAuth themselves.
 app.use("/api", darajaWebhookRoutes); // POST /api/payments/callback/stk, POST /api/payouts/callback/b2c
+
+// 5E-3: a loading agent is a site-verification role, not a commercial one. Fail closed for every route
+// except the gate APIs, notifications, identity and the active-site list, so a newly added router can't leak by default.
+const AGENT_ALLOWED = /^\/(auth|me|notifications|gate|loading-sites)(\/|$)/;
+app.use("/api", (req, res, next) => {
+  const header = req.headers.authorization || "";
+  if (!header.startsWith("Bearer ")) return next();
+  let role;
+  try { role = verifyToken(header.slice(7)).role; } catch { return next(); }
+  if (role === "loading_agent" && !AGENT_ALLOWED.test(req.path)) {
+    return res.status(403).json({ error: "This action is not available to loading agents.", code: "ROLE_NOT_PERMITTED" });
+  }
+  next();
+});
 
 app.use("/api/auth", authRoutes);
 app.use("/api/me", meRouter);

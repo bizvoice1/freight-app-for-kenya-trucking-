@@ -163,6 +163,10 @@ export function verifyAndRecordGateEvent({ scanned, agentUserId, now = new Date(
     if (!booking.truckId || !booking.driverId || booking.truckId !== trip.truckId || booking.driverId !== trip.driverId) {
       fail(409, "GATE_ASSIGNMENT_MISMATCH", "Trip and booking assignment disagree.");
     }
+    const issuer = tx.select().from(users).where(eq(users.id, row.issuedToUserId)).get();
+    if (!issuer || issuer.role !== "driver" || issuer.driverId !== trip.driverId) {
+      fail(409, "GATE_ASSIGNMENT_MISMATCH", "This token was issued to a driver who is no longer assigned to the trip.");
+    }
     const escrow = tx.select().from(escrows).where(eq(escrows.bookingId, booking.id)).get();
     const funded = !!escrow && escrow.status === ESCROW_STATUS.HELD;
     if (!funded) fail(409, "GATE_NOT_FUNDED", "The booking is not funded.");

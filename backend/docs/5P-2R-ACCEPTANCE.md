@@ -57,3 +57,9 @@ Findings of the read-only lifecycle audit (bc12859 vs working tree):
 - Invisible (backend present, no UI): Dispatched, At Pickup, GATE_IN, Loading, In Transit control, At Delivery, release, payout.
 
 Decision: build the real Driver / Loading Agent / Admin-release UI against the existing backend (5E-4A..C); do not restore old mock controls; do not expose a plain "Delivered" button before 5H.
+
+## 5P-3 acceptance evidence (live DB, BHL-1002 chain)
+- Real operational graph on the live backend: second truck KDC 300C + second driver Peter Otieno (own login), assigned and trip TRP-1002 created, funded ESC-1002 (HELD, 45,000); Shipper (Grace) and Transporter (Ahmed) tracking read the same backend position; a second transporter (Carol) cannot access Ahmed's fleet, driver, trip or GPS.
+- Deviation approved by the user: BHL-1002 used instead of BHL-1001.
+- **GPS qualification:** the location point (LOC-1002 at -1.2921, 36.8219) was a real authenticated backend location write, but **not a real device geolocation fix**. Actual phone GPS is to be tested during the operational pilot.
+- Live DB records are intentionally left in place as pilot-state data.

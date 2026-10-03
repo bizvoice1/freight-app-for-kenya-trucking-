@@ -40,6 +40,7 @@ const SITE2 = { id: "LS-2", name: "Mombasa Yard", lat: -4.0435, lng: 39.6682, ra
 const NOW = iso(T0);
 for (const s of [SITE1, SITE2]) run("INSERT INTO loading_sites (id,name,lat,lng,radius_meters,active,created_at,updated_at) VALUES (?,?,?,?,?,1,?,?)", s.id, s.name, s.lat, s.lng, s.radius, NOW, NOW);
 for (const [id, phone] of [["USR-AG1", "0799000001"], ["USR-AG2", "0799000002"], ["USR-AG3", "0799000003"]]) run("INSERT INTO users (id,phone,pin_hash,role,name) VALUES (?,?,?,?,?)", id, phone, "x", "loading_agent", id);
+run("INSERT OR IGNORE INTO users (id,phone,pin_hash,role,name,driver_id) VALUES (?,?,?,?,?,?)", "USR-DRV1000", "0799000009", "x", "driver", "Fixture driver", "DRV-1000");
 run("INSERT INTO loading_agent_sites (agent_user_id,site_id,created_at) VALUES ('USR-AG1','LS-1',?)", NOW);
 run("INSERT INTO loading_agent_sites (agent_user_id,site_id,created_at) VALUES ('USR-AG3','LS-1',?)", NOW);
 run("INSERT INTO loading_agent_sites (agent_user_id,site_id,created_at) VALUES ('USR-AG2','LS-2',?)", NOW);
@@ -57,7 +58,9 @@ function mkTrip({ site = "LS-1", escrow = "Held", status = "At Pickup", truck = 
   run("INSERT INTO trips (id,load_id,booking_id,truck_id,driver_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)", TR, L, B, truck, driver, status, NOW, NOW);
   return { tripId: TR, loadId: L, bookingId: B };
 }
-const issue = (tripId, purpose, now = T0) => gate.issueGateToken({ tripId, purpose, issuedToUserId: "USR-1000", now });
+// The token must be issued to the user who is the trip's current driver (the scan re-checks that, 5E-3).
+const driverUser = (tripId) => one("SELECT u.id id FROM users u JOIN trips t ON t.driver_id = u.driver_id WHERE t.id = ?", tripId).id;
+const issue = (tripId, purpose, now = T0) => gate.issueGateToken({ tripId, purpose, issuedToUserId: driverUser(tripId), now });
 const scan = (tok, agent = "USR-AG1", now = at(10)) => gate.verifyAndRecordGateEvent({ scanned: tok.qrText ?? tok, agentUserId: agent, now });
 const events = (tripId) => all("SELECT * FROM gate_events WHERE trip_id = ? ORDER BY created_at, id", tripId);
 const tripStatus = (id) => one("SELECT status FROM trips WHERE id = ?", id).status;
@@ -269,7 +272,7 @@ await test("25. DB backstop refuses forged events: bad assignment, bad token, wr
 });
 function consumedTok0(t) { // token for a trip whose status makes issue() ineligible: insert directly
   const id = `GTK-RAW${n}`;
-  run("INSERT INTO gate_tokens (id,trip_id,purpose,token_hash,issued_to_user_id,issued_at,expires_at) VALUES (?,?,?,?,?,?,?)", id, t.tripId, "LOADING_COMPLETE", `h${n}`, "USR-1000", iso(at(0)), iso(at(300)));
+  run("INSERT INTO gate_tokens (id,trip_id,purpose,token_hash,issued_to_user_id,issued_at,expires_at) VALUES (?,?,?,?,?,?,?)", id, t.tripId, "LOADING_COMPLETE", `h${n}`, driverUser(t.tripId), iso(at(0)), iso(at(300)));
   run("UPDATE gate_tokens SET consumed_at=?, consumed_by_user_id='USR-AG1' WHERE id=?", iso(at(5)), id);
   return id;
 }
