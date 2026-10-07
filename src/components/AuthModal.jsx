@@ -7,6 +7,7 @@ const LOGIN_ROLES = [
   { id: "fleet_owner", label: "Transporter", icon: "🚛" },
   { id: "driver",      label: "Driver",      icon: "📍" },
   { id: "admin",       label: "Admin",       icon: "⚙" },
+  { id: "loading_agent", label: "Loading Agent", icon: "🛂" },
 ];
 const REGISTER_ROLES = LOGIN_ROLES.filter((r) => r.id === "shipper" || r.id === "fleet_owner");
 

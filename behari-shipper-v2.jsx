@@ -930,8 +930,8 @@ function DetailModal({ s, commerce, onClose, onConfirmDelivery = ()=>{}, escrowD
         {canConfirmDelivery && !isReadyForRelease && !isDelivered && (
           <div style={{ display:"flex",gap:8,marginBottom:8 }}>
             <a href="tel:+254712345678" style={{ flex:1,background:C.bg,color:C.black,textDecoration:"none",textAlign:"center",borderRadius:8,padding:13,fontSize:14,fontWeight:700,border:`1px solid ${C.border}` }}>📞 Call</a>
-            <button onClick={()=>setDeliveryFlow(true)} style={{ flex:2,background:C.black,color:C.white,border:"none",borderRadius:8,padding:13,fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:font }}>
-              ✓ Confirm Delivery
+            <button disabled title="Delivery confirmation requires verified proof of delivery (coming soon)" style={{ flex:2,background:C.bg,color:C.muted,border:`1px solid ${C.border}`,borderRadius:8,padding:13,fontSize:13,fontWeight:700,cursor:"not-allowed",fontFamily:font }}>
+              Delivery confirmation: awaiting proof of delivery
             </button>
           </div>
         )}

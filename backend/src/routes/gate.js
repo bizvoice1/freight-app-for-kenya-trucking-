@@ -6,6 +6,7 @@
  *   GET    /api/trips/:tripId/gate               driver (own trip) | admin   gate state + next permitted action
  *   POST   /api/trips/:tripId/gate-token         driver (own trip)           issue a QR token for the ONE eligible step
  *   POST   /api/gate/scan                        loading_agent               verify + record evidence (+ transition)
+ *   GET    /api/gate/agent/sites                 loading_agent               the agent's assigned sites (id, name, active)
  *   GET    /api/gate/agent/trips[/:tripId]       loading_agent               scoped read model (no money / commercial data)
  *   GET    /api/loading-sites                    any authenticated role      active sites (id, name) for choosing a pickup site
  *   POST   /api/loading-sites                    admin                       create site
@@ -115,6 +116,12 @@ router.post("/gate/scan", requireRole("loading_agent"), guard(async (req, res) =
     },
     trip: view ?? null,
   });
+}));
+
+router.get("/gate/agent/sites", requireRole("loading_agent"), guard((req, res) => {
+  const siteIds = db.select().from(loadingAgentSites).where(eq(loadingAgentSites.agentUserId, req.user.id)).all().map((a) => a.siteId);
+  const rows = siteIds.length ? db.select().from(loadingSites).all().filter((s) => siteIds.includes(s.id)) : [];
+  res.json(rows.map((s) => ({ id: s.id, name: s.name, active: !!s.active })));
 }));
 
 router.get("/gate/agent/trips", requireRole("loading_agent"), guard((req, res) => {

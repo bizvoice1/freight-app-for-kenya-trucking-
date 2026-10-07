@@ -11,5 +11,5 @@ Correct driver succeeds for both steps; another driver 403; transporter, shipper
 Driver login -> trip picker -> Assigned panel -> Dispatch -> Dispatched -> full reload keeps Dispatched -> Arrived at Pickup -> "Ready for Gate Verification", no buttons. 0 console errors.
 
 ## Known limits / flagged
-- Backend `DRIVER_TRANSITIONS` still lets a driver call At Delivery -> Delivered via the API (the UI exposes no such button). Closing it belongs with 5H (Digital PoD).
-- Real device geolocation was not exercised (browser had no GPS fix); GPS continuity is proven via authenticated location writes.
+- **5H SECURITY REQUIREMENT:** backend `DRIVER_TRANSITIONS` still lets a driver call At Delivery -> Delivered via the API (the UI exposes no such button). The backend itself must refuse direct delivery completion without the required PoD evidence; hiding the button is not sufficient. Deliberately NOT fixed in 5E-4B; must be closed in 5H.
+- Real device geolocation was not exercised (browser had no GPS fix); GPS continuity is proven via authenticated location writes. Qualification kept for pilot: real phone GPS is to be tested in the operational pilot (not a blocker).

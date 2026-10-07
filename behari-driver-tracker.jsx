@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 // Phase 4E introduced this screen; Phase 4F gave it a real backend.
 // Deliberately its own tiny app, not a tab inside the Carrier portal: the
 // person holding this phone is the DRIVER, who may not be the fleet owner
@@ -13,7 +13,9 @@ import { useState, useEffect, useCallback } from "react";
 // this is no longer optional. Truck plate lookup still falls back to the
 // frontend's fleetService for the Phase 4F/4G seed trip, which predates
 // backend/api/trucks — see getTruckLabel below.
+import QRCode from "qrcode";
 import { getTruckById } from "./src/services/fleetService.js";
+import { getGateState, issueGatePass } from "./src/services/gateApi.js";
 import { ACTIVE_TRIP_STATUSES } from "./src/models/trip.js";
 import GoogleMap from "./src/components/maps/GoogleMap.jsx";
 import { hasMapsKey } from "./src/services/googleMaps.js";
@@ -166,13 +168,129 @@ function TripPicker({ driverId, onPick, onSwitchDriver, onExit }) {
 const STAGE_COPY = {
   "Assigned":   { title: "Assigned", note: "Start the journey when you leave for the pickup site.", action: { label: "DISPATCH / START JOURNEY", next: "Dispatched" } },
   "Dispatched": { title: "Dispatched", note: "On the way to pickup. Confirm when you reach the site.", action: { label: "ARRIVED AT PICKUP", next: "At Pickup" } },
-  "At Pickup":  { title: "Ready for Gate Verification", note: "Loading requires verification at the pickup site." },
-  "Loading":    { title: "Loading in progress", note: "The loading agent controls the next step." },
-  "In Transit": { title: "In transit", note: "Delivery arrival controls are not available yet." },
+  "In Transit": { title: "Loading complete — trip in transit", note: "Delivery arrival controls are not available yet." },
   "At Delivery":{ title: "At delivery", note: "Awaiting delivery confirmation." },
 };
 
-function TripStatusPanel({ trip, onChanged }) {
+
+/* ── Gate pass: every fact here comes from the backend; the QR text is issued by the backend and never shown as text ── */
+const GATE_COPY = {
+  GATE_IN:          { title: "Ready for Gate Verification", note: "Show this pass to the loading agent at the gate." },
+  LOADING_START:    { title: "Gate verified", note: "Show this pass to the loading agent to start loading." },
+  LOADING_COMPLETE: { title: "Loading in progress", note: "When loading is finished, show this pass to the loading agent." },
+};
+const GATE_STATUSES = ["At Pickup", "Loading"];
+
+function GatePassPanel({ trip, truckPlate, onTripChanged }) {
+  const [gateSnap, setGateSnap] = useState(null);   // {data, seq}: seq = pass-issue counter when the request started
+  const gate = gateSnap?.data || null;
+  const [pass, setPass] = useState(null);       // {qrText, expiresAt, refreshAt, purpose, qrUrl}
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [now, setNow] = useState(Date.now());
+  const seq = useRef(0);
+
+  const refreshGate = useCallback(async () => {
+    const mySeq = seq.current;
+    const r = await getGateState(trip.id);
+    if (mySeq !== seq.current) return null;   // a newer pass was issued while this request was in flight
+    if (!r.ok) return null;
+    setGateSnap({ data: r.data, seq: mySeq });
+    if (r.data.tripStatus !== trip.status) {
+      const fresh = await getTrip(trip.id);
+      if (fresh) onTripChanged(fresh);
+    }
+    return r.data;
+  }, [trip.id, trip.status, onTripChanged]);
+
+  useEffect(() => { refreshGate(); const iv = setInterval(refreshGate, 3000); return () => clearInterval(iv); }, [refreshGate]);
+  useEffect(() => { const iv = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(iv); }, []);
+
+  // The shown pass stops being active when the backend says so: consumed, replaced, or for a different step.
+  useEffect(() => {
+    if (!pass || !gateSnap || gateSnap.seq < pass.seq) return;   // ignore snapshots taken before this pass existed
+    const active = gateSnap.data.activeToken;
+    if (!active || active.purpose !== pass.purpose || active.expiresAt !== pass.expiresAt) {
+      setPass(null);
+      setNotice(active ? "A newer gate pass was issued." : "Gate pass used.");
+    }
+  }, [gateSnap, pass]);
+
+  useEffect(() => {
+    if (pass && Date.parse(pass.expiresAt) <= now) { setPass(null); setNotice("Gate pass expired."); }
+  }, [pass, now]);
+
+  const issue = useCallback(async (purpose, auto) => {
+    setBusy(true); setError("");
+    const r = await issueGatePass(trip.id, purpose);
+    if (!r.ok) {
+      setError(auto ? "Could not refresh the gate pass." : r.error);
+      if (auto) setPass(null);
+      seq.current += 1; await refreshGate();
+      setBusy(false);
+      return;
+    }
+    const { qrText, expiresAt, refreshAt, purpose: p } = r.data;
+    let qrUrl = "";
+    try { qrUrl = await QRCode.toDataURL(qrText, { margin: 1, width: 280, errorCorrectionLevel: "M" }); }
+    catch { setError("Could not draw the gate pass. Try again."); setBusy(false); return; }
+    seq.current += 1;
+    setNotice("");
+    setPass({ qrText, expiresAt, refreshAt, purpose: p, qrUrl, seq: seq.current });
+    setBusy(false);
+    await refreshGate();
+  }, [trip.id, refreshGate]);
+
+  // Automatic replacement around refreshAt. Always re-requests the SAME purpose, so it can never issue the next step's pass.
+  useEffect(() => {
+    if (!pass) return;
+    const wait = Math.max(0, Date.parse(pass.refreshAt) - Date.now());
+    if (Date.parse(pass.expiresAt) <= Date.now() + 500) return;
+    const t = setTimeout(() => issue(pass.purpose, true), wait);
+    return () => clearTimeout(t);
+  }, [pass, issue]);
+
+  const next = gate?.nextAction || null;
+  const copy = next ? GATE_COPY[next.purpose] : null;
+  const remaining = pass ? Math.max(0, Math.round((Date.parse(pass.expiresAt) - now) / 1000)) : 0;
+
+  return (
+    <div data-testid="gate-pass-panel" style={{ marginTop:8 }}>
+      <div style={{ fontSize:14, fontWeight:700 }}>{copy?.title || (trip.status === "Loading" ? "Loading in progress" : "Ready for Gate Verification")}</div>
+      <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>
+        Pickup: <span data-testid="gate-site">{gate?.site?.name || "—"}</span><br />
+        Truck: <span data-testid="gate-truck">{truckPlate || "—"}</span>
+      </div>
+      {copy && !pass && <div style={{ fontSize:12, color:C.muted, marginTop:8 }}>{copy.note}</div>}
+      {!next && gate?.blockedReason && (
+        <div data-testid="gate-blocked" style={{ background:C.redBg, color:C.red, fontSize:12, borderRadius:8, padding:"10px 12px", marginTop:10 }}>{gate.blockedReason}</div>
+      )}
+      {pass && (
+        <div style={{ marginTop:12, textAlign:"center" }}>
+          <div style={{ display:"inline-block", background:"#fff", padding:8, borderRadius:10 }}>
+            <img data-testid="gate-pass-qr" data-purpose={pass.purpose} src={pass.qrUrl} alt="Gate pass QR code" width={240} height={240} style={{ display:"block" }} />
+          </div>
+          <div data-testid="gate-pass-expiry" style={{ fontSize:12, color: remaining <= 30 ? C.amber : C.muted, marginTop:8 }}>
+            Valid for {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")} · refreshes automatically
+          </div>
+        </div>
+      )}
+      {!pass && next && (
+        <button
+          data-testid="show-gate-pass" disabled={busy} onClick={() => issue(next.purpose, false)}
+          style={{ marginTop:12, width:"100%", background:C.green, color:"#00220F", border:"none", borderRadius:10, padding:"14px", fontSize:14, fontWeight:800, fontFamily:font, cursor: busy ? "default" : "pointer", opacity: busy ? 0.7 : 1 }}
+        >
+          {busy ? "Preparing…" : "SHOW GATE PASS"}
+        </button>
+      )}
+      {notice && <div data-testid="gate-notice" style={{ fontSize:12, color:C.muted, marginTop:10 }}>{notice}</div>}
+      {error && <div data-testid="gate-error" style={{ background:C.redBg, color:C.red, fontSize:12, borderRadius:8, padding:"10px 12px", marginTop:10 }}>{error}</div>}
+    </div>
+  );
+}
+
+function TripStatusPanel({ trip, truckPlate, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const copy = STAGE_COPY[trip.status];
@@ -193,6 +311,7 @@ function TripStatusPanel({ trip, onChanged }) {
     <div data-testid="trip-status-panel" style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginBottom:16 }}>
       <div style={{ fontSize:11, color:C.muted, fontWeight:700, letterSpacing:1, marginBottom:6 }}>TRIP STATUS</div>
       <div data-testid="trip-status" style={{ fontSize:15, fontWeight:800, color:C.green }}>{trip.status}</div>
+      {GATE_STATUSES.includes(trip.status) && <GatePassPanel trip={trip} truckPlate={truckPlate} onTripChanged={onChanged} />}
       {copy && (
         <div style={{ marginTop:8 }}>
           <div style={{ fontSize:14, fontWeight:700 }}>{copy.title}</div>
@@ -280,7 +399,7 @@ function TrackerScreen({ tripId, driverName, onSwitchTrip, onExit }) {
           <div style={{ fontSize:22, fontWeight:800, marginBottom:2 }}>{truck?.plate || "—"}</div>
           <div style={{ fontSize:14, color:C.muted, marginBottom:24 }}>{trip.pickup} → {trip.delivery}</div>
 
-          <TripStatusPanel trip={trip} onChanged={setTrip} />
+          <TripStatusPanel trip={trip} truckPlate={truck?.plate} onChanged={setTrip} />
 
           <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px", marginBottom:24 }}>
             <div style={{ fontSize:11, color:C.muted, fontWeight:700, letterSpacing:1, marginBottom:6 }}>GPS</div>
@@ -325,7 +444,7 @@ function TrackerScreen({ tripId, driverName, onSwitchTrip, onExit }) {
             </div>
           </div>
 
-          <TripStatusPanel trip={trip} onChanged={setTrip} />
+          <TripStatusPanel trip={trip} truckPlate={truck?.plate} onChanged={setTrip} />
 
           <div style={{ fontSize:12, color:C.muted, marginBottom:24 }}>
             Updated {ago != null ? `${ago} sec ago` : "—"}

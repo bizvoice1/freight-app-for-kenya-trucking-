@@ -16,6 +16,7 @@ const BehariShipper = lazy(() => import("../behari-shipper-v2.jsx"));
 // not be the fleet owner at all (see models/fleetOwner.js's whole reason
 // for existing). One job only: start/stop location sharing for a trip.
 const BehariDriverTracker = lazy(() => import("../behari-driver-tracker.jsx"));
+const BehariLoadingAgent = lazy(() => import("../behari-loading-agent.jsx"));
 // Phase 4H — the real Load/Booking/Trip marketplace, backed by backend/.
 // Standalone, same precedent as the Driver Tracker: new backend-connected
 // capability, not a rewrite of the existing escrow-simulated demo flows.
@@ -238,24 +239,26 @@ const PORTALS = [
   { id:"shipper", label:"Shipper Portal",   sub:"Post cargo & track loads",  icon:"📦", component:BehariShipper },
   { id:"admin",   label:"Admin Dashboard",  sub:"Operations & KYC centre",   icon:"⚙", component:BehariAdmin   },
   { id:"tracker", label:"Driver Tracker",   sub:"Live location sharing",     icon:"📍", component:BehariDriverTracker },
+  { id:"agent",   label:"Loading Agent",    sub:"Gate pass verification",    icon:"🛂", component:BehariLoadingAgent },
   { id:"marketplace", label:"Marketplace",  sub:"Real loads & bookings (backend)", icon:"🏪", component:BehariMarketplace },
 ];
 
 const NAV_LABELS = {
-  driver:"Transporter", shipper:"Shipper", admin:"Admin", tracker:"Driver Tracker", marketplace:"Marketplace"
+  driver:"Transporter", shipper:"Shipper", admin:"Admin", tracker:"Driver Tracker", agent:"Loading Agent", marketplace:"Marketplace"
 };
 
 // Portals reachable per signed-in identity (derived from the backend role, never chosen).
-const BACKEND_TO_APP_ROLE = { shipper:"shipper", fleet_owner:"driver", driver:"tracker", admin:"admin" };
+const BACKEND_TO_APP_ROLE = { shipper:"shipper", fleet_owner:"driver", driver:"tracker", admin:"admin", loading_agent:"agent" };
 const ROLE_ACCESS = {
   driver:  ["driver", "marketplace"],
   shipper: ["shipper", "marketplace"],
   admin:   ["admin"],
   tracker: ["tracker"],
+  agent:   ["agent"],
 };
 
 const ROLE_NAMES = {
-  driver:"Transporter", shipper:"Shipper", admin:"Admin", tracker:"Driver", marketplace:"Marketplace"
+  driver:"Transporter", shipper:"Shipper", admin:"Admin", tracker:"Driver", agent:"Loading Agent", marketplace:"Marketplace"
 };
 
 export default function App() {
@@ -603,7 +606,7 @@ export default function App() {
 
           <div style={{ display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:16 }}>
             {PORTALS.filter(p => p.id !== "marketplace").map(p=>{
-              const cardRole = { driver:"fleet_owner", shipper:"shipper", admin:"admin", tracker:"driver" }[p.id];
+              const cardRole = { driver:"fleet_owner", shipper:"shipper", admin:"admin", tracker:"driver", agent:"loading_agent" }[p.id];
               return (
                 <button key={p.id} onClick={()=>openAuth("login", cardRole)} style={{
                   background:C.white,border:`1.5px solid ${C.border}`,borderRadius:12,
